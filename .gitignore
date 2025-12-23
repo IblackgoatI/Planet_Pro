@@ -74,8 +74,8 @@ Plugins/**/Intermediate/*
 # Cache files for the editor to use
 DerivedDataCache/*
 
-# Unreal's Content folder and its subfolders
-Content/*/**
-
-#The specific folder inside the Content folder is included.
-!Content/00_Project/**
+#Content 폴더 내 개발자 임시파일
+Content/Collections/
+Content/Developers/
+Content/__ExternalActors__/
+Content/__ExternalObjects__/
