@@ -79,3 +79,6 @@ Content/Collections/
 Content/Developers/
 Content/__ExternalActors__/
 Content/__ExternalObjects__/
+
+#jetbrain 설정 파일 무시
+.idea/
