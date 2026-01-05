@@ -15,10 +15,12 @@ public class Planet_Pro : ModuleRules
 			"InputCore", 
 			"Json", 
 			"JsonUtilities", 
-			// ▼ 여기 스펠링, 대소문자 정확해야 합니다!
 			"PlayFab", 
 			"PlayFabCpp", 
-			"PlayFabCommon" 
+			"PlayFabCommon" ,
+			"UMG", 
+			"Slate", 
+			"SlateCore"
 		});
 	}
 }
