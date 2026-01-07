@@ -10,35 +10,68 @@
 #include "Core/PlayFabClientAPI.h"         // API 클래스 (Delegate 용)
 
 
-AMyCharacter::AMyCharacter()
-{
-	PrimaryActorTick.bCanEverTick = true;
-}
-
 void AMyCharacter::BeginPlay()
 {
-	Super::BeginPlay();
+    Super::BeginPlay();
 
-	FString CurrentMapName = GetWorld()->GetMapName();
-	
-	if (!CurrentMapName.Contains("Lobby") && MainHUDClass)
-	{
-		APlayerController* PC = Cast<APlayerController>(GetController());
-		if (PC)
-		{
-			MainHUDInstance = CreateWidget<UMainHUDWidget>(PC, MainHUDClass);
-			if (MainHUDInstance)
-			{
-				MainHUDInstance->AddToViewport();
-				if (MainHUDInstance->InventoryWindow)
-				{
-					MainHUDInstance->InventoryWindow->SetVisibility(ESlateVisibility::Hidden);
-				}
-			}
-		}
-	}
-	//playfab에서 인벤토리 정보 Load
-	LoadInventoryFromPlayFab();
+    // 1. UI 생성 로직 (기존 코드 유지)
+    FString CurrentMapName = GetWorld()->GetMapName();
+    if (!CurrentMapName.Contains("Lobby") && MainHUDClass)
+    {
+       APlayerController* PC = Cast<APlayerController>(GetController());
+       if (PC)
+       {
+          MainHUDInstance = CreateWidget<UMainHUDWidget>(PC, MainHUDClass);
+          if (MainHUDInstance)
+          {
+             MainHUDInstance->AddToViewport();
+             if (MainHUDInstance->InventoryWindow)
+             {
+                MainHUDInstance->InventoryWindow->SetVisibility(ESlateVisibility::Hidden);
+             }
+          }
+       }
+    }
+
+    // =================================================================
+    // [추가된 부분] 테스트용 자동 로그인 코드
+    // =================================================================
+    
+    // 1. PlayFab 모듈 가져오기
+    auto ClientAPI = IPlayFabModuleInterface::Get().GetClientAPI();
+
+    // 2. 이미 로그인 되어 있는지 확인 (로비에서 넘어왔으면 true일 것임)
+    if (ClientAPI.IsValid() && ClientAPI->IsClientLoggedIn())
+    {
+        UE_LOG(LogTemp, Warning, TEXT("✅ [PlayFab] 이미 로그인 상태입니다. 인벤토리를 불러옵니다."));
+        LoadInventoryFromPlayFab();
+    }
+    else
+    {
+        UE_LOG(LogTemp, Warning, TEXT("⚠️ [PlayFab] 로그인 안 됨! 테스트용 자동 로그인을 시도합니다..."));
+
+        PlayFab::ClientModels::FLoginWithCustomIDRequest Request;
+        Request.CustomId = TEXT("TestUser_01"); // 테스트용 아이디 (아무거나 적어도 됨)
+        Request.CreateAccount = true;           // 계정 없으면 새로 만들기
+
+        ClientAPI->LoginWithCustomID(Request,
+            // 로그인 성공 시
+            PlayFab::UPlayFabClientAPI::FLoginWithCustomIDDelegate::CreateLambda(
+                [this](const PlayFab::ClientModels::FLoginResult& Result)
+                {
+                    UE_LOG(LogTemp, Warning, TEXT("✅ [PlayFab] 자동 로그인 성공! 이제 인벤토리를 불러옵니다."));
+                    this->LoadInventoryFromPlayFab(); // 로그인 성공 후에 불러오기 실행!
+                }
+            ),
+            // 로그인 실패 시
+            PlayFab::FPlayFabErrorDelegate::CreateLambda(
+                [](const PlayFab::FPlayFabCppError& ErrorResult)
+                {
+                    UE_LOG(LogTemp, Error, TEXT("❌ [PlayFab] 자동 로그인 실패: %s"), *ErrorResult.ErrorMessage);
+                }
+            )
+        );
+    }
 }
 
 void AMyCharacter::OnInventoryKeyPressed()
@@ -85,7 +118,7 @@ void AMyCharacter::AddTestItem()
 	SaveInventoryToPlayFab();
 }
 
-void AMyCharacter::SaveInventoryToPlayFab()
+/*void AMyCharacter::SaveInventoryToPlayFab()
 {
 	// 1. JSON 데이터 만들기 (이 부분은 완벽합니다!)
 	TArray<TSharedPtr<FJsonValue>> JsonItemsArray;
@@ -140,8 +173,71 @@ void AMyCharacter::SaveInventoryToPlayFab()
 			)
 		);
 	}
-}
+}*/
 
+void AMyCharacter::SaveInventoryToPlayFab()
+{
+    // [추적 1] 함수 진입 확인
+    UE_LOG(LogTemp, Warning, TEXT("🚩 [1] SaveInventoryToPlayFab 함수 시작됨!"));
+
+    // 1. JSON 데이터 만들기
+    TArray<TSharedPtr<FJsonValue>> JsonItemsArray;
+    for (const FPlanetItemInfo& Item : Inventory)
+    {
+       TSharedPtr<FJsonObject> ItemObject = MakeShareable(new FJsonObject);
+       ItemObject->SetStringField(TEXT("ItemID"), Item.ItemID.ToString());
+       ItemObject->SetNumberField(TEXT("Amount"), Item.Amount);
+
+       TSharedPtr<FJsonValueObject> JsonValue = MakeShareable(new FJsonValueObject(ItemObject));
+       JsonItemsArray.Add(JsonValue);
+    }
+
+    TSharedPtr<FJsonObject> RootObject = MakeShareable(new FJsonObject);
+    RootObject->SetArrayField(TEXT("Items"), JsonItemsArray);
+
+    FString OutputString;
+    TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&OutputString);
+    FJsonSerializer::Serialize(RootObject.ToSharedRef(), Writer);
+
+    // [추적 2] JSON 변환 확인
+    UE_LOG(LogTemp, Warning, TEXT("🚩 [2] JSON 생성 완료: %s"), *OutputString);
+
+    // 2. PlayFab 요청 데이터 준비
+    PlayFab::ClientModels::FUpdateUserDataRequest Request;
+    Request.Data.Add(TEXT("Inventory"), OutputString);
+
+    // 3. API 담당자 가져오기
+    auto ClientAPI = IPlayFabModuleInterface::Get().GetClientAPI();
+
+    // 4. 실행
+    if (ClientAPI.IsValid())
+    {
+       UE_LOG(LogTemp, Warning, TEXT("🚩 [3] ClientAPI 유효함. 서버로 전송 시도..."));
+
+       ClientAPI->UpdateUserData(
+          Request,
+          PlayFab::UPlayFabClientAPI::FUpdateUserDataDelegate::CreateLambda(
+             [this](const PlayFab::ClientModels::FUpdateUserDataResult& Result)
+             {
+                UE_LOG(LogTemp, Warning, TEXT("🚩 [4-성공] 서버 응답 옴: 저장 성공!"));
+                this->OnSaveSuccess(Result);
+             }
+          ),
+          PlayFab::FPlayFabErrorDelegate::CreateLambda(
+             [this](const PlayFab::FPlayFabCppError& ErrorResult)
+             {
+                UE_LOG(LogTemp, Error, TEXT("🚩 [4-실패] 서버 응답 옴: 실패! 이유: %s"), *ErrorResult.ErrorMessage);
+                this->OnSaveError(ErrorResult);
+             }
+          )
+       );
+    }
+    else
+    {
+        // 🚨 여기가 범인일 확률 높음
+        UE_LOG(LogTemp, Error, TEXT("🚨 [ERROR] ClientAPI가 유효하지 않습니다! (로그인이 안 됐거나, PlayFab 설정 누락)"));
+    }
+}
 
 void AMyCharacter::OnSaveSuccess(const PlayFab::ClientModels::FUpdateUserDataResult& Result)
 {
