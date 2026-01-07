@@ -41,7 +41,8 @@ public:
 	void OnInventoryKeyPressed();
 
 	UFUNCTION(BlueprintCallable, Category = "Inventory")
-	void AddTestItem();
+	//void AddTestItem(); 테스트용 코드
+	void AddInventoryItem(FName NewItemID, int32 NewAmount);
 
 	// PlayFab 저장 함수들
 	void SaveInventoryToPlayFab();
