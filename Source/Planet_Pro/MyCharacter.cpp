@@ -76,6 +76,22 @@ void AMyCharacter::BeginPlay()
             )
         );
     }
+	/*// [긴급 복구용] 인벤토리 초기화 코드
+	// ※ 주의: 게임 실행 후 인벤토리가 0이 된 걸 확인하면, 이 코드는 다시 지우거나 주석 처리하세요!
+
+	// 1. 배열 싹 비우기
+	Inventory.Empty();
+
+	// 2. 서버에도 빈 배열로 덮어쓰기 (저장)
+	SaveInventoryToPlayFab();
+
+	UE_LOG(LogTemp, Warning, TEXT("🧹 [긴급] 인벤토리를 강제로 초기화했습니다! (쓰레기 값 제거 완료)"));
+
+	// 3. (선택) UI도 갱신해서 눈으로 확인
+	if (MainHUDInstance)
+	{
+		MainHUDInstance->RefreshInventory(Inventory);
+	}*/
 }
 
 void AMyCharacter::OnInventoryKeyPressed()
@@ -92,39 +108,52 @@ void AMyCharacter::OnInventoryKeyPressed()
 
 void AMyCharacter::AddInventoryItem(FName NewItemID, int32 NewAmount)
 {
-	// 0개 이하라면 무시 (방어 코드)
 	if (NewAmount <= 0) return;
 
-	bool bFound = false;
-
-	// 1. 이미 있는 아이템인지 확인
-	for (FPlanetItemInfo& Item : Inventory)
+	// 1. [기존 로직] 이미 가지고 있는 아이템인가? (스택 합치기)
+	for (int32 i = 0; i < Inventory.Num(); i++)
 	{
-		// "Wood" 대신 입력받은 NewItemID와 비교
-		if (Item.ItemID == NewItemID)
+		if (Inventory[i].ItemID == NewItemID)
 		{
-			Item.Amount += NewAmount; // 입력받은 개수만큼 더하기
-			bFound = true;
-			break;
+			Inventory[i].Amount += NewAmount;
+            
+			// UI 갱신 & 저장
+			if (MainHUDInstance) MainHUDInstance->RefreshInventory(Inventory);
+			SaveInventoryToPlayFab();
+			return; // 함수 종료
 		}
 	}
 
-	// 2. 없는 아이템이면 새로 추가
-	if (!bFound)
+	// =============================================================
+	// 2. [신규 로직] 빈 자리(None)가 있는가? (구멍 메우기)
+	// =============================================================
+	for (int32 i = 0; i < Inventory.Num(); i++)
 	{
-		FPlanetItemInfo NewItem;
-		NewItem.ItemID = NewItemID;  // 입력받은 이름
-		NewItem.Amount = NewAmount;  // 입력받은 개수
-		Inventory.Add(NewItem);
+		// 이름이 "None"이거나 수량이 0인 곳을 찾음
+		if (Inventory[i].ItemID == FName("None") || Inventory[i].Amount <= 0)
+		{
+			Inventory[i].ItemID = NewItemID;
+			Inventory[i].Amount = NewAmount;
+
+			UE_LOG(LogTemp, Warning, TEXT("✨ 빈 슬롯(%d번)에 아이템을 채워 넣었습니다!"), i);
+
+			// UI 갱신 & 저장
+			if (MainHUDInstance) MainHUDInstance->RefreshInventory(Inventory);
+			SaveInventoryToPlayFab();
+			return; // 함수 종료
+		}
 	}
 
-	// 3. UI 갱신
-	if (MainHUDInstance)
-	{
-		MainHUDInstance->RefreshInventory(Inventory);
-	}
+	// =============================================================
+	// 3. [기존 로직] 빈자리도 없다면? (새 칸 늘리기)
+	// =============================================================
+	FPlanetItemInfo NewItem;
+	NewItem.ItemID = NewItemID;
+	NewItem.Amount = NewAmount;
+	Inventory.Add(NewItem);
 
-	// 4. PlayFab 저장 (자동 저장)
+	// UI 갱신 & 저장
+	if (MainHUDInstance) MainHUDInstance->RefreshInventory(Inventory);
 	SaveInventoryToPlayFab();
 }
 
@@ -398,4 +427,44 @@ void AMyCharacter::OnLoadSuccess(const PlayFab::ClientModels::FGetUserDataResult
 void AMyCharacter::OnLoadError(const PlayFab::FPlayFabCppError& ErrorResult)
 {
 	UE_LOG(LogTemp, Error, TEXT("❌ [PlayFab] 불러오기 실패: %s"), *ErrorResult.ErrorMessage);
+}
+
+void AMyCharacter::SwapInventoryItems(int32 SourceIndex, int32 DestinationIndex)
+{
+	// 1. 유효성 체크
+	if (SourceIndex == DestinationIndex) return;
+	if (SourceIndex < 0 || DestinationIndex < 0) return;
+
+	// 2. 배열 확장 및 "청소" (가장 중요한 수정 부분!)
+	int32 MaxIndex = FMath::Max(SourceIndex, DestinationIndex);
+    
+	if (Inventory.Num() <= MaxIndex)
+	{
+		int32 OldSize = Inventory.Num();
+		int32 NewSize = MaxIndex + 1;
+
+		// 방 늘리기
+		Inventory.SetNum(NewSize);
+
+		// [중요] 새로 생긴 방들은 "쓰레기 값"이 들어있으므로, 싹 다 0으로 초기화!
+		for (int32 i = OldSize; i < NewSize; i++)
+		{
+			Inventory[i].ItemID = FName("None"); // 이름 없음
+			Inventory[i].Amount = 0;             // 수량 0 (이게 없어서 10억이 뜬 것!)
+		}
+	}
+
+	// 3. 이제 깨끗한 방에서 안전하게 교환
+	Inventory.Swap(SourceIndex, DestinationIndex);
+
+	// 4. UI 갱신
+	if (MainHUDInstance)
+	{
+		MainHUDInstance->RefreshInventory(Inventory);
+	}
+
+	// 5. 저장
+	SaveInventoryToPlayFab();
+    
+	UE_LOG(LogTemp, Warning, TEXT("✨ [성공] %d번 <-> %d번 교체 완료. (배열 크기: %d)"), SourceIndex, DestinationIndex, Inventory.Num());
 }

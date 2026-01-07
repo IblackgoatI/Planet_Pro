@@ -25,6 +25,11 @@ protected:
 	virtual void BeginPlay() override;
 
 public:
+	
+	// 인벤토리 두 칸의 위치를 바꾸는 함수
+	UFUNCTION(BlueprintCallable, Category = "Inventory")
+	void SwapInventoryItems(int32 SourceIndex, int32 DestinationIndex);
+	
 	// UI 변수
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "UI")
 	TSubclassOf<class UUserWidget> MainHUDClass;
