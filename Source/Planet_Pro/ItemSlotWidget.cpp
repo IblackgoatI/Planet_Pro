@@ -2,6 +2,7 @@
 #include "InventoryDragDropOperation.h" // 1단계에서 만든 헤더
 #include "Blueprint/WidgetBlueprintLibrary.h"
 #include "MyCharacter.h" // 캐릭터 함수 호출용
+#include "Components/Image.h" // [필수] 이미지 컴포넌트 헤더
 
 
 // [중요] 클래스 이름은 UItemSlotWidget 이어야 합니다!
@@ -163,29 +164,18 @@ bool UItemSlotWidget::NativeOnDrop(const FGeometry& InGeometry, const FDragDropE
 
 void UItemSlotWidget::SetIsSelected(bool bSelected)
 {
+	// 방어 코드: 테두리 이미지가 없으면 아무것도 안 함
+	if (!Img_Outline) return;
+
 	if (bSelected)
 	{
-		// 1. 선택됨: 크기를 1.2배로 키움 (Pop 효과)
-		SetRenderScale(FVector2D(1.2f, 1.2f));
-
-		// 2. 배경색을 "딩컴 스타일 초록색"으로 변경
-		if (Img_BG)
-		{
-			// R=0.2, G=0.8, B=0.2 (연두색 느낌)
-			Img_BG->SetColorAndOpacity(FLinearColor(0.2f, 0.8f, 0.2f, 1.0f));
-		}
+		// 선택됨: 테두리 보이기! (Visible)
+		Img_Outline->SetVisibility(ESlateVisibility::Visible);
 	}
 	else
 	{
-		// 1. 선택 해제: 크기 원상복구
-		SetRenderScale(FVector2D(1.0f, 1.0f));
-
-		// 2. 배경색을 원래대로 (흰색 or 투명)
-		if (Img_BG)
-		{
-			// 원래 색상 (흰색 1.0, 1.0, 1.0, 1.0)
-			Img_BG->SetColorAndOpacity(FLinearColor::White);
-		}
+		// 선택 해제: 테두리 숨기기! (Hidden)
+		Img_Outline->SetVisibility(ESlateVisibility::Hidden);
 	}
 }
 
