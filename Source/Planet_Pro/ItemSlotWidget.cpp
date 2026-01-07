@@ -164,18 +164,6 @@ bool UItemSlotWidget::NativeOnDrop(const FGeometry& InGeometry, const FDragDropE
 
 void UItemSlotWidget::SetIsSelected(bool bSelected)
 {
-	// 방어 코드: 테두리 이미지가 없으면 아무것도 안 함
-	if (!Img_Outline) return;
-
-	if (bSelected)
-	{
-		// 선택됨: 테두리 보이기! (Visible)
-		Img_Outline->SetVisibility(ESlateVisibility::Visible);
-	}
-	else
-	{
-		// 선택 해제: 테두리 숨기기! (Hidden)
-		Img_Outline->SetVisibility(ESlateVisibility::Hidden);
-	}
+	PlaySelectionAnim(bSelected);
 }
 

@@ -40,6 +40,8 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (BindWidget))
 	class UImage* Img_Outline;
 	
+	UFUNCTION(BlueprintImplementableEvent)
+	void PlaySelectionAnim(bool bIsSelected);
 	
 	// 1. 아이콘 이미지 (BlueprintReadWrite 추가 -> 그래프에서 변수로 보임!)
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (BindWidget))
