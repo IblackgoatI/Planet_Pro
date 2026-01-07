@@ -26,6 +26,23 @@ protected:
 
 public:
 	
+	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
+	// [추가] 현재 선택된 퀵슬롯 번호 (0 ~ 7)
+	int32 CurrentSelectedSlotIndex = 0;
+
+	// [추가] 키보드 입력 처리 함수들
+	void SelectQuickSlot(int32 SlotIndex); // 공통 처리 함수
+    
+	// 키 바인딩용 함수들
+	void OnQuickSlot1();
+	void OnQuickSlot2();
+	void OnQuickSlot3();
+	void OnQuickSlot4();
+	void OnQuickSlot5();
+	void OnQuickSlot6();
+	void OnQuickSlot7();
+	void OnQuickSlot8();
+	
 	// 인벤토리 두 칸의 위치를 바꾸는 함수
 	UFUNCTION(BlueprintCallable, Category = "Inventory")
 	void SwapInventoryItems(int32 SourceIndex, int32 DestinationIndex);

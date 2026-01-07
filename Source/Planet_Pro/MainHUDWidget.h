@@ -19,6 +19,10 @@ public:
 	UPROPERTY(meta = (BindWidget))
 	class UUniformGridPanel* InventoryGrid;
 
+	// [추가] 특정 번호의 퀵슬롯만 강조하는 함수
+	UFUNCTION(BlueprintCallable)
+	void UpdateQuickSlotHighlight(int32 SelectedIndex);
+	
 	// [추가] 퀵슬롯 바 (블루프린트의 Horizontal Box와 연결됨)
 	UPROPERTY(meta = (BindWidget))
 	class UHorizontalBox* QuickSlotBar; 

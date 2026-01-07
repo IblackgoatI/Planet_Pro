@@ -468,3 +468,47 @@ void AMyCharacter::SwapInventoryItems(int32 SourceIndex, int32 DestinationIndex)
     
 	UE_LOG(LogTemp, Warning, TEXT("✨ [성공] %d번 <-> %d번 교체 완료. (배열 크기: %d)"), SourceIndex, DestinationIndex, Inventory.Num());
 }
+
+// 1. 공통 처리 함수: 번호를 받아서 HUD에게 알림
+void AMyCharacter::SelectQuickSlot(int32 SlotIndex)
+{
+    // 이미 선택된 거 또 누르면 무시 (원하면 빼도 됨)
+    // if (CurrentSelectedSlotIndex == SlotIndex) return;
+
+    CurrentSelectedSlotIndex = SlotIndex;
+    
+    // HUD에 시각적 업데이트 요청
+    if (MainHUDInstance)
+    {
+        MainHUDInstance->UpdateQuickSlotHighlight(CurrentSelectedSlotIndex);
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("✅ 퀵슬롯 선택: %d번"), SlotIndex + 1);
+}
+
+// 2. 각 키별 연결 함수 (0번부터 시작하므로 -1씩 계산)
+void AMyCharacter::OnQuickSlot1() { SelectQuickSlot(0); }
+void AMyCharacter::OnQuickSlot2() { SelectQuickSlot(1); }
+void AMyCharacter::OnQuickSlot3() { SelectQuickSlot(2); }
+void AMyCharacter::OnQuickSlot4() { SelectQuickSlot(3); }
+void AMyCharacter::OnQuickSlot5() { SelectQuickSlot(4); }
+void AMyCharacter::OnQuickSlot6() { SelectQuickSlot(5); }
+void AMyCharacter::OnQuickSlot7() { SelectQuickSlot(6); }
+void AMyCharacter::OnQuickSlot8() { SelectQuickSlot(7); }
+
+// 3. SetupPlayerInputComponent에 키 연결
+void AMyCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
+{
+    Super::SetupPlayerInputComponent(PlayerInputComponent);
+
+    // [중요] 프로젝트 세팅 -> 입력 -> Action Mappings에 이름이 등록되어 있어야 함!
+    // "QuickSlot1", "QuickSlot2"... 이런 식으로 이름을 지었다고 가정
+    PlayerInputComponent->BindAction("QuickSlot1", IE_Pressed, this, &AMyCharacter::OnQuickSlot1);
+    PlayerInputComponent->BindAction("QuickSlot2", IE_Pressed, this, &AMyCharacter::OnQuickSlot2);
+    PlayerInputComponent->BindAction("QuickSlot3", IE_Pressed, this, &AMyCharacter::OnQuickSlot3);
+    PlayerInputComponent->BindAction("QuickSlot4", IE_Pressed, this, &AMyCharacter::OnQuickSlot4);
+    PlayerInputComponent->BindAction("QuickSlot5", IE_Pressed, this, &AMyCharacter::OnQuickSlot5);
+    PlayerInputComponent->BindAction("QuickSlot6", IE_Pressed, this, &AMyCharacter::OnQuickSlot6);
+    PlayerInputComponent->BindAction("QuickSlot7", IE_Pressed, this, &AMyCharacter::OnQuickSlot7);
+    PlayerInputComponent->BindAction("QuickSlot8", IE_Pressed, this, &AMyCharacter::OnQuickSlot8);
+}

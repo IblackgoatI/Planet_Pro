@@ -30,6 +30,12 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category = "Inventory")
 	int32 SavedAmount;
 	
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (BindWidget))
+	class UImage* Img_BG;
+	
+	// [추가] 선택 여부에 따라 스타일을 바꾸는 함수
+	void SetIsSelected(bool bSelected);
+	
 	// 1. 아이콘 이미지 (BlueprintReadWrite 추가 -> 그래프에서 변수로 보임!)
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (BindWidget))
 	class UImage* ItemIcon;

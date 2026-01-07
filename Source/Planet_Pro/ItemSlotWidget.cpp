@@ -160,3 +160,32 @@ bool UItemSlotWidget::NativeOnDrop(const FGeometry& InGeometry, const FDragDropE
     
 	return true;
 }
+
+void UItemSlotWidget::SetIsSelected(bool bSelected)
+{
+	if (bSelected)
+	{
+		// 1. 선택됨: 크기를 1.2배로 키움 (Pop 효과)
+		SetRenderScale(FVector2D(1.2f, 1.2f));
+
+		// 2. 배경색을 "딩컴 스타일 초록색"으로 변경
+		if (Img_BG)
+		{
+			// R=0.2, G=0.8, B=0.2 (연두색 느낌)
+			Img_BG->SetColorAndOpacity(FLinearColor(0.2f, 0.8f, 0.2f, 1.0f));
+		}
+	}
+	else
+	{
+		// 1. 선택 해제: 크기 원상복구
+		SetRenderScale(FVector2D(1.0f, 1.0f));
+
+		// 2. 배경색을 원래대로 (흰색 or 투명)
+		if (Img_BG)
+		{
+			// 원래 색상 (흰색 1.0, 1.0, 1.0, 1.0)
+			Img_BG->SetColorAndOpacity(FLinearColor::White);
+		}
+	}
+}
+

@@ -112,3 +112,28 @@ void UMainHUDWidget::RefreshInventory(const TArray<FPlanetItemInfo>& InventoryIt
         }
     }
 }
+
+void UMainHUDWidget::UpdateQuickSlotHighlight(int32 SelectedIndex)
+{
+    if (!QuickSlotBar) return;
+
+    TArray<UWidget*> QSlots = QuickSlotBar->GetAllChildren();
+
+    // 모든 퀵슬롯을 하나씩 검사
+    for (int32 i = 0; i < QSlots.Num(); i++)
+    {
+        UItemSlotWidget* SlotWidget = Cast<UItemSlotWidget>(QSlots[i]);
+        if (SlotWidget)
+        {
+            // "지금 검사하는 번호(i)"가 "선택된 번호(SelectedIndex)"랑 같니?
+            if (i == SelectedIndex)
+            {
+                SlotWidget->SetIsSelected(true);  // 너는 커져라!
+            }
+            else
+            {
+                SlotWidget->SetIsSelected(false); // 너는 작아져라!
+            }
+        }
+    }
+}
