@@ -1,71 +1,139 @@
 #include "MainHUDWidget.h"
-#include "ItemSlotWidget.h" // [필수] 슬롯 위젯을 제어하기 위해 헤더 포함
+#include "ItemSlotWidget.h"
+#include "Components/HorizontalBox.h" 
+#include "Components/UniformGridSlot.h" // [필수] 행/열 계산을 위해 필요
 
 void UMainHUDWidget::ToggleInventory()
 {
-	// 방어 코드: 인벤토리 창이 없으면 아무것도 안 함
-	if (!InventoryWindow) return;
+    if (!InventoryWindow) return;
 
-	// 상태 뒤집기 (닫힘 <-> 열림)
-	bIsInventoryOpen = !bIsInventoryOpen;
-	
-	// 플레이어 컨트롤러 가져오기 (마우스 조종용)
-	APlayerController* PC = GetOwningPlayer();
+    bIsInventoryOpen = !bIsInventoryOpen;
+    
+    APlayerController* PC = GetOwningPlayer();
 
-	if (bIsInventoryOpen)
-	{
-		// 1. 열기 (보이게)
-		InventoryWindow->SetVisibility(ESlateVisibility::Visible);
-		
-		// 2. 마우스 켜고 UI 모드로 전환
-		if (PC)
-		{
-			PC->bShowMouseCursor = true;
-			PC->SetInputMode(FInputModeGameAndUI());
-		}
-	}
-	else
-	{
-		// 1. 닫기 (숨기기)
-		InventoryWindow->SetVisibility(ESlateVisibility::Hidden);
-
-		// 2. 마우스 끄고 게임 모드로 복귀
-		if (PC)
-		{
-			PC->bShowMouseCursor = false;
-			PC->SetInputMode(FInputModeGameOnly());
-		}
-	}
+    if (bIsInventoryOpen)
+    {
+        InventoryWindow->SetVisibility(ESlateVisibility::Visible);
+        if (PC)
+        {
+            PC->bShowMouseCursor = true;
+            PC->SetInputMode(FInputModeGameAndUI());
+        }
+    }
+    else
+    {
+        InventoryWindow->SetVisibility(ESlateVisibility::Hidden);
+        if (PC)
+        {
+            PC->bShowMouseCursor = false;
+            PC->SetInputMode(FInputModeGameOnly());
+        }
+    }
 }
 
 void UMainHUDWidget::RefreshInventory(const TArray<FPlanetItemInfo>& InventoryItems)
 {
-	// 방어 코드: 그리드 패널이 연결 안 됐으면 중단
-	if (!InventoryGrid) return;
+    // =========================================================
+    // 1. 퀵슬롯 업데이트 (가로 1줄, 0 ~ 9번)
+    // =========================================================
+    if (QuickSlotBar)
+    {
+        TArray<UWidget*> QSlots = QuickSlotBar->GetAllChildren();
+        
+        for (int32 i = 0; i < QSlots.Num(); i++)
+        {
+            UItemSlotWidget* SlotWidget = Cast<UItemSlotWidget>(QSlots[i]);
+            if (SlotWidget)
+            {
+                SlotWidget->MyIndex = i; // 퀵슬롯 번호 (0~9)
 
-	// 1. 그리드 패널 안의 모든 자식(슬롯 위젯들)을 가져옴
-	TArray<UWidget*> Slots = InventoryGrid->GetAllChildren();
+                if (InventoryItems.IsValidIndex(i))
+                {
+                    SlotWidget->UpdateSlot(InventoryItems[i].ItemID, InventoryItems[i].Amount);
+                }
+                else
+                {
+                    SlotWidget->UpdateSlot(FName("None"), 0);
+                }
+            }
+        }
+    }
 
-	// 2. 슬롯 개수만큼 반복
-	for (int32 i = 0; i < Slots.Num(); i++)
-	{
-		// 자식 위젯을 ItemSlotWidget으로 형변환 (Cast)
-		UItemSlotWidget* SlotWidget = Cast<UItemSlotWidget>(Slots[i]);
+    // =========================================================
+    // 2. 메인 인벤토리 업데이트 (행/열 계산 방식)
+    // =========================================================
+    if (InventoryGrid)
+    {
+        TArray<UWidget*> GSlots = InventoryGrid->GetAllChildren();
+        
+        // 퀵슬롯 개수 (0~9번까지 10개)
+        const int32 QuickSlotCount = 10; 
+        
+        // [중요 체크] 본인 UI의 가로 칸 수에 맞춰주세요! (사진상으로는 6칸, 코드엔 8칸으로 적으셨음)
+        // 만약 가로가 6칸이면 6으로, 8칸이면 8로 고치세요.
+        const int32 ColumnsPerRow = 8; 
 
-		// 형변환 성공 시 (즉, 올바른 슬롯 위젯이라면)
-		if (SlotWidget)
-		{
-			// 내 인벤토리 데이터(배열)에 i번째 아이템이 존재하는지 확인
-			if (InventoryItems.IsValidIndex(i))
-			{
-				// 데이터가 있음 -> 아이템 정보로 슬롯 업데이트
-				SlotWidget->UpdateSlot(InventoryItems[i].ItemID, InventoryItems[i].Amount);
-			}
-			else
-			{
-				// 데이터가 없음 -> 빈칸으로 초기화 (None, 0개)
-				SlotWidget->UpdateSlot(FName("None"), 0);
-			}
-		}
-	}
+        for (UWidget* Widget : GSlots)
+        {
+            UItemSlotWidget* SlotWidget = Cast<UItemSlotWidget>(Widget);
+            if (SlotWidget)
+            {
+                // 1. 이 슬롯이 그리드 몇 번째 줄, 몇 번째 칸에 있는지 알아냄
+                UUniformGridSlot* GridSlot = Cast<UUniformGridSlot>(SlotWidget->Slot);
+                
+                int32 FinalIndex = -1;
+
+                if (GridSlot)
+                {
+                    int32 Row = GridSlot->GetRow();
+                    int32 Col = GridSlot->GetColumn();
+
+                    // 2. 수학 공식으로 번호 계산: (줄 번호 * 칸수) + 칸 번호 + 퀵슬롯개수
+                    FinalIndex = (Row * ColumnsPerRow) + Col + QuickSlotCount;
+                }
+                else
+                {
+                    continue; 
+                }
+
+                // 3. 번호표 부여 (드래그 앤 드롭의 핵심!)
+                SlotWidget->MyIndex = FinalIndex;
+
+                // 4. 아이템 표시
+                if (InventoryItems.IsValidIndex(FinalIndex))
+                {
+                    SlotWidget->UpdateSlot(InventoryItems[FinalIndex].ItemID, InventoryItems[FinalIndex].Amount);
+                }
+                else
+                {
+                    SlotWidget->UpdateSlot(FName("None"), 0);
+                }
+            }
+        }
+    }
+}
+
+void UMainHUDWidget::UpdateQuickSlotHighlight(int32 SelectedIndex)
+{
+    if (!QuickSlotBar) return;
+
+    TArray<UWidget*> QSlots = QuickSlotBar->GetAllChildren();
+
+    // 모든 퀵슬롯을 하나씩 검사
+    for (int32 i = 0; i < QSlots.Num(); i++)
+    {
+        UItemSlotWidget* SlotWidget = Cast<UItemSlotWidget>(QSlots[i]);
+        if (SlotWidget)
+        {
+            // "지금 검사하는 번호(i)"가 "선택된 번호(SelectedIndex)"랑 같니?
+            if (i == SelectedIndex)
+            {
+                SlotWidget->SetIsSelected(true);  // 너는 커져라!
+            }
+            else
+            {
+                SlotWidget->SetIsSelected(false); // 너는 작아져라!
+            }
+        }
+    }
 }

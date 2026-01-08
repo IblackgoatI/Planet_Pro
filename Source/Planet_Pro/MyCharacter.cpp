@@ -9,6 +9,10 @@
 #include "Core/PlayFabClientDataModels.h"  // 데이터 모델 (Request 용)
 #include "Core/PlayFabClientAPI.h"         // API 클래스 (Delegate 용)
 
+AMyCharacter::AMyCharacter()
+{
+	PrimaryActorTick.bCanEverTick = true;
+}
 
 void AMyCharacter::BeginPlay()
 {
@@ -72,6 +76,22 @@ void AMyCharacter::BeginPlay()
             )
         );
     }
+	/*// [긴급 복구용] 인벤토리 초기화 코드
+	// ※ 주의: 게임 실행 후 인벤토리가 0이 된 걸 확인하면, 이 코드는 다시 지우거나 주석 처리하세요!
+
+	// 1. 배열 싹 비우기
+	Inventory.Empty();
+
+	// 2. 서버에도 빈 배열로 덮어쓰기 (저장)
+	SaveInventoryToPlayFab();
+
+	UE_LOG(LogTemp, Warning, TEXT("🧹 [긴급] 인벤토리를 강제로 초기화했습니다! (쓰레기 값 제거 완료)"));
+
+	// 3. (선택) UI도 갱신해서 눈으로 확인
+	if (MainHUDInstance)
+	{
+		MainHUDInstance->RefreshInventory(Inventory);
+	}*/
 }
 
 void AMyCharacter::OnInventoryKeyPressed()
@@ -86,7 +106,58 @@ void AMyCharacter::OnInventoryKeyPressed()
 	}
 }
 
-void AMyCharacter::AddTestItem()
+void AMyCharacter::AddInventoryItem(FName NewItemID, int32 NewAmount)
+{
+	if (NewAmount <= 0) return;
+
+	// 1. [기존 로직] 이미 가지고 있는 아이템인가? (스택 합치기)
+	for (int32 i = 0; i < Inventory.Num(); i++)
+	{
+		if (Inventory[i].ItemID == NewItemID)
+		{
+			Inventory[i].Amount += NewAmount;
+            
+			// UI 갱신 & 저장
+			if (MainHUDInstance) MainHUDInstance->RefreshInventory(Inventory);
+			SaveInventoryToPlayFab();
+			return; // 함수 종료
+		}
+	}
+
+	// =============================================================
+	// 2. [신규 로직] 빈 자리(None)가 있는가? (구멍 메우기)
+	// =============================================================
+	for (int32 i = 0; i < Inventory.Num(); i++)
+	{
+		// 이름이 "None"이거나 수량이 0인 곳을 찾음
+		if (Inventory[i].ItemID == FName("None") || Inventory[i].Amount <= 0)
+		{
+			Inventory[i].ItemID = NewItemID;
+			Inventory[i].Amount = NewAmount;
+
+			UE_LOG(LogTemp, Warning, TEXT("✨ 빈 슬롯(%d번)에 아이템을 채워 넣었습니다!"), i);
+
+			// UI 갱신 & 저장
+			if (MainHUDInstance) MainHUDInstance->RefreshInventory(Inventory);
+			SaveInventoryToPlayFab();
+			return; // 함수 종료
+		}
+	}
+
+	// =============================================================
+	// 3. [기존 로직] 빈자리도 없다면? (새 칸 늘리기)
+	// =============================================================
+	FPlanetItemInfo NewItem;
+	NewItem.ItemID = NewItemID;
+	NewItem.Amount = NewAmount;
+	Inventory.Add(NewItem);
+
+	// UI 갱신 & 저장
+	if (MainHUDInstance) MainHUDInstance->RefreshInventory(Inventory);
+	SaveInventoryToPlayFab();
+}
+
+/*void AMyCharacter::AddTestItem()
 {
 	// [아이템 추가]
 	bool bFound = false;
@@ -116,7 +187,7 @@ void AMyCharacter::AddTestItem()
 
 	// [자동 저장]
 	SaveInventoryToPlayFab();
-}
+}*/
 
 /*void AMyCharacter::SaveInventoryToPlayFab()
 {
@@ -177,10 +248,45 @@ void AMyCharacter::AddTestItem()
 
 void AMyCharacter::SaveInventoryToPlayFab()
 {
-    // [추적 1] 함수 진입 확인
-    UE_LOG(LogTemp, Warning, TEXT("🚩 [1] SaveInventoryToPlayFab 함수 시작됨!"));
+    // 1. PlayFab API 담당자 가져오기
+    auto ClientAPI = IPlayFabModuleInterface::Get().GetClientAPI();
 
-    // 1. JSON 데이터 만들기
+    // [방어 코드] API가 없거나 로그인이 안 된 경우 -> 즉시 로그인 시도!
+    if (!ClientAPI.IsValid() || !ClientAPI->IsClientLoggedIn())
+    {
+        UE_LOG(LogTemp, Warning, TEXT("⚠️ [PlayFab] 로그인 없이 저장을 시도했습니다. 긴급 로그인을 진행합니다..."));
+
+        PlayFab::ClientModels::FLoginWithCustomIDRequest Request;
+        Request.CustomId = TEXT("TestUser_01"); // 테스트용 ID
+        Request.CreateAccount = true;
+
+        if (ClientAPI.IsValid())
+        {
+            ClientAPI->LoginWithCustomID(Request,
+                PlayFab::UPlayFabClientAPI::FLoginWithCustomIDDelegate::CreateLambda(
+                    [this](const PlayFab::ClientModels::FLoginResult& Result)
+                    {
+                        UE_LOG(LogTemp, Warning, TEXT("✅ [PlayFab] 긴급 로그인 성공! 다시 저장을 시도합니다."));
+                        // 로그인 성공했으니, 재귀적으로 다시 저장 함수 호출
+                        this->SaveInventoryToPlayFab(); 
+                    }
+                ),
+                PlayFab::FPlayFabErrorDelegate::CreateLambda(
+                    [](const PlayFab::FPlayFabCppError& ErrorResult)
+                    {
+                        UE_LOG(LogTemp, Error, TEXT("❌ [PlayFab] 긴급 로그인 실패: %s"), *ErrorResult.ErrorMessage);
+                    }
+                )
+            );
+        }
+        return; // 로그인이 끝나면 다시 들어올 테니 여기서 함수 종료
+    }
+
+    // =======================================================
+    // 2. 여기서부터는 기존 저장 로직 (로그인 된 상태)
+    // =======================================================
+
+    // JSON 데이터 만들기
     TArray<TSharedPtr<FJsonValue>> JsonItemsArray;
     for (const FPlanetItemInfo& Item : Inventory)
     {
@@ -199,44 +305,29 @@ void AMyCharacter::SaveInventoryToPlayFab()
     TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&OutputString);
     FJsonSerializer::Serialize(RootObject.ToSharedRef(), Writer);
 
-    // [추적 2] JSON 변환 확인
-    UE_LOG(LogTemp, Warning, TEXT("🚩 [2] JSON 생성 완료: %s"), *OutputString);
+    UE_LOG(LogTemp, Warning, TEXT("🚩 [PlayFab] 인벤토리 데이터 생성 완료: %s"), *OutputString);
 
-    // 2. PlayFab 요청 데이터 준비
+    // PlayFab 요청
     PlayFab::ClientModels::FUpdateUserDataRequest Request;
     Request.Data.Add(TEXT("Inventory"), OutputString);
 
-    // 3. API 담당자 가져오기
-    auto ClientAPI = IPlayFabModuleInterface::Get().GetClientAPI();
-
-    // 4. 실행
-    if (ClientAPI.IsValid())
-    {
-       UE_LOG(LogTemp, Warning, TEXT("🚩 [3] ClientAPI 유효함. 서버로 전송 시도..."));
-
-       ClientAPI->UpdateUserData(
-          Request,
-          PlayFab::UPlayFabClientAPI::FUpdateUserDataDelegate::CreateLambda(
-             [this](const PlayFab::ClientModels::FUpdateUserDataResult& Result)
-             {
-                UE_LOG(LogTemp, Warning, TEXT("🚩 [4-성공] 서버 응답 옴: 저장 성공!"));
-                this->OnSaveSuccess(Result);
-             }
-          ),
-          PlayFab::FPlayFabErrorDelegate::CreateLambda(
-             [this](const PlayFab::FPlayFabCppError& ErrorResult)
-             {
-                UE_LOG(LogTemp, Error, TEXT("🚩 [4-실패] 서버 응답 옴: 실패! 이유: %s"), *ErrorResult.ErrorMessage);
-                this->OnSaveError(ErrorResult);
-             }
-          )
-       );
-    }
-    else
-    {
-        // 🚨 여기가 범인일 확률 높음
-        UE_LOG(LogTemp, Error, TEXT("🚨 [ERROR] ClientAPI가 유효하지 않습니다! (로그인이 안 됐거나, PlayFab 설정 누락)"));
-    }
+    ClientAPI->UpdateUserData(
+       Request,
+       PlayFab::UPlayFabClientAPI::FUpdateUserDataDelegate::CreateLambda(
+          [this](const PlayFab::ClientModels::FUpdateUserDataResult& Result)
+          {
+             UE_LOG(LogTemp, Warning, TEXT("✅ [PlayFab] 서버 저장 성공!!!"));
+             this->OnSaveSuccess(Result);
+          }
+       ),
+       PlayFab::FPlayFabErrorDelegate::CreateLambda(
+          [this](const PlayFab::FPlayFabCppError& ErrorResult)
+          {
+             UE_LOG(LogTemp, Error, TEXT("❌ [PlayFab] 서버 저장 실패: %s"), *ErrorResult.ErrorMessage);
+             this->OnSaveError(ErrorResult);
+          }
+       )
+    );
 }
 
 void AMyCharacter::OnSaveSuccess(const PlayFab::ClientModels::FUpdateUserDataResult& Result)
@@ -336,4 +427,88 @@ void AMyCharacter::OnLoadSuccess(const PlayFab::ClientModels::FGetUserDataResult
 void AMyCharacter::OnLoadError(const PlayFab::FPlayFabCppError& ErrorResult)
 {
 	UE_LOG(LogTemp, Error, TEXT("❌ [PlayFab] 불러오기 실패: %s"), *ErrorResult.ErrorMessage);
+}
+
+void AMyCharacter::SwapInventoryItems(int32 SourceIndex, int32 DestinationIndex)
+{
+	// 1. 유효성 체크
+	if (SourceIndex == DestinationIndex) return;
+	if (SourceIndex < 0 || DestinationIndex < 0) return;
+
+	// 2. 배열 확장 및 "청소" (가장 중요한 수정 부분!)
+	int32 MaxIndex = FMath::Max(SourceIndex, DestinationIndex);
+    
+	if (Inventory.Num() <= MaxIndex)
+	{
+		int32 OldSize = Inventory.Num();
+		int32 NewSize = MaxIndex + 1;
+
+		// 방 늘리기
+		Inventory.SetNum(NewSize);
+
+		// [중요] 새로 생긴 방들은 "쓰레기 값"이 들어있으므로, 싹 다 0으로 초기화!
+		for (int32 i = OldSize; i < NewSize; i++)
+		{
+			Inventory[i].ItemID = FName("None"); // 이름 없음
+			Inventory[i].Amount = 0;             // 수량 0 (이게 없어서 10억이 뜬 것!)
+		}
+	}
+
+	// 3. 이제 깨끗한 방에서 안전하게 교환
+	Inventory.Swap(SourceIndex, DestinationIndex);
+
+	// 4. UI 갱신
+	if (MainHUDInstance)
+	{
+		MainHUDInstance->RefreshInventory(Inventory);
+	}
+
+	// 5. 저장
+	SaveInventoryToPlayFab();
+    
+	UE_LOG(LogTemp, Warning, TEXT("✨ [성공] %d번 <-> %d번 교체 완료. (배열 크기: %d)"), SourceIndex, DestinationIndex, Inventory.Num());
+}
+
+// 1. 공통 처리 함수: 번호를 받아서 HUD에게 알림
+void AMyCharacter::SelectQuickSlot(int32 SlotIndex)
+{
+    // 이미 선택된 거 또 누르면 무시 (원하면 빼도 됨)
+    // if (CurrentSelectedSlotIndex == SlotIndex) return;
+
+    CurrentSelectedSlotIndex = SlotIndex;
+    
+    // HUD에 시각적 업데이트 요청
+    if (MainHUDInstance)
+    {
+        MainHUDInstance->UpdateQuickSlotHighlight(CurrentSelectedSlotIndex);
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("✅ 퀵슬롯 선택: %d번"), SlotIndex + 1);
+}
+
+// 2. 각 키별 연결 함수 (0번부터 시작하므로 -1씩 계산)
+void AMyCharacter::OnQuickSlot1() { SelectQuickSlot(0); }
+void AMyCharacter::OnQuickSlot2() { SelectQuickSlot(1); }
+void AMyCharacter::OnQuickSlot3() { SelectQuickSlot(2); }
+void AMyCharacter::OnQuickSlot4() { SelectQuickSlot(3); }
+void AMyCharacter::OnQuickSlot5() { SelectQuickSlot(4); }
+void AMyCharacter::OnQuickSlot6() { SelectQuickSlot(5); }
+void AMyCharacter::OnQuickSlot7() { SelectQuickSlot(6); }
+void AMyCharacter::OnQuickSlot8() { SelectQuickSlot(7); }
+
+// 3. SetupPlayerInputComponent에 키 연결
+void AMyCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
+{
+    Super::SetupPlayerInputComponent(PlayerInputComponent);
+
+    // [중요] 프로젝트 세팅 -> 입력 -> Action Mappings에 이름이 등록되어 있어야 함!
+    // "QuickSlot1", "QuickSlot2"... 이런 식으로 이름을 지었다고 가정
+    PlayerInputComponent->BindAction("QuickSlot1", IE_Pressed, this, &AMyCharacter::OnQuickSlot1);
+    PlayerInputComponent->BindAction("QuickSlot2", IE_Pressed, this, &AMyCharacter::OnQuickSlot2);
+    PlayerInputComponent->BindAction("QuickSlot3", IE_Pressed, this, &AMyCharacter::OnQuickSlot3);
+    PlayerInputComponent->BindAction("QuickSlot4", IE_Pressed, this, &AMyCharacter::OnQuickSlot4);
+    PlayerInputComponent->BindAction("QuickSlot5", IE_Pressed, this, &AMyCharacter::OnQuickSlot5);
+    PlayerInputComponent->BindAction("QuickSlot6", IE_Pressed, this, &AMyCharacter::OnQuickSlot6);
+    PlayerInputComponent->BindAction("QuickSlot7", IE_Pressed, this, &AMyCharacter::OnQuickSlot7);
+    PlayerInputComponent->BindAction("QuickSlot8", IE_Pressed, this, &AMyCharacter::OnQuickSlot8);
 }
