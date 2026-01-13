@@ -2,16 +2,13 @@
 
 #include "CoreMinimal.h"
 #include "Engine/GameInstance.h"
-
-// [중요] 외부 플러그인(PlayFab) 헤더는 무조건 .generated.h 보다 위에 있어야 합니다!
 #include "PlayFab.h"
 #include "Core/PlayFabClientDataModels.h"
 #include "Core/PlayFabClientAPI.h"
-
-// [필수] 이 generated 헤더는 항상 include 목록 중 '맨 마지막'이어야 합니다.
+#include "PlayFabError.h" // 에러 처리를 위해 필요
 #include "MyGameInstance.generated.h"
 
-// 1. 아이템 데이터 구조체
+// 아이템 데이터 구조체
 USTRUCT(BlueprintType)
 struct FItemData
 {
@@ -25,19 +22,18 @@ public:
 	int32 Amount;
 };
 
-// 2. 클래스 정의
 UCLASS()
 class PLANET_PRO_API UMyGameInstance : public UGameInstance
 {
 	GENERATED_BODY()
 
 public:
-	// 인벤토리 배열
+	// ==========================================================
+	// 1. [기존] 인벤토리 시스템
+	// ==========================================================
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Inventory")
 	TArray<FItemData> MyInventory;
 
-	// --- 기존 함수들 ---
-	
 	UFUNCTION(BlueprintCallable, Category = "Inventory")
 	void AddOrUpdateItem(FName InItemID, int32 InAmount);
 	
@@ -47,9 +43,30 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Inventory")
 	TMap<FString, FString> GetInventoryMapForPlayFab();
 	
-	// --- [NEW] 대망의 자동 저장 함수 ---
-	
-	// 이 함수 하나만 부르면 저장 끝 (핀 연결 X)
 	UFUNCTION(BlueprintCallable, Category = "PlayFab")
 	void SaveInventoryToPlayFab_CPP();
+
+
+	// ==========================================================
+	// 2. [NEW] 시간 저장/로드 시스템
+	// ==========================================================
+
+	// [시간 저장 시스템]
+	UPROPERTY(BlueprintReadOnly, Category = "TimeSystem")
+	float SavedSkyTime = -1.0f; 
+
+	UFUNCTION(BlueprintCallable, Category = "TimeSystem")
+	void SaveSkyTime(float CurrentTime);
+
+	UFUNCTION(BlueprintCallable, Category = "TimeSystem")
+	void LoadSkyTime();
+
+private:
+	// 콜백 함수들
+	void OnSaveTimeSuccess(const PlayFab::ClientModels::FUpdateUserDataResult& Result);
+	void OnLoadTimeSuccess(const PlayFab::ClientModels::FGetUserDataResult& Result);
+
+	// ★★★ [수정됨] FPlayFabError -> FPlayFabCppError ★★★
+	// 인자 타입을 FPlayFabCppError로 바꿔야 합니다.
+	void OnTimeError(const PlayFab::FPlayFabCppError& ErrorResult);
 };

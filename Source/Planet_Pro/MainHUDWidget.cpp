@@ -1,5 +1,6 @@
 #include "MainHUDWidget.h"
 #include "ItemSlotWidget.h"
+#include "MyGameInstance.h"
 #include "Components/HorizontalBox.h" 
 #include "Components/UniformGridSlot.h" // [필수] 행/열 계산을 위해 필요
 #include "Components/TextBlock.h"
@@ -155,7 +156,7 @@ void UMainHUDWidget::NativeConstruct()
     {
         if (Actor->GetName().Contains(TEXT("StylizedSky")))
         {
-            SkyActor = Actor;
+               SkyActor = Actor;
             break;
         }
     }
@@ -163,6 +164,9 @@ void UMainHUDWidget::NativeConstruct()
     // 2. [중요] 게임 켜질 때 시간 강제 설정 (아침 8시)
     // 저장된 데이터가 0으로 만들든 말든, 여기서 800으로 덮어씁니다.
     InternalGameTime = 800.0f; 
+    
+    GetWorld()->GetTimerManager().SetTimer(TimerHandle_AutoSave, this, &UMainHUDWidget::AutoSaveTime, 60.0f, true);
+    
 }
 
 void UMainHUDWidget::UpdateGameTime()
@@ -261,5 +265,47 @@ void UMainHUDWidget::UpdateGameTime()
     {
         if (Icon_Moon && Img_SunMoon->GetBrush().GetResourceObject() != Icon_Moon)
             Img_SunMoon->SetBrushFromTexture(Icon_Moon);
+    }
+}
+// [빠진 함수 추가] 틱(매 프레임) 함수
+void UMainHUDWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
+{
+    Super::NativeTick(MyGeometry, InDeltaTime);
+
+    // 필요한 경우 여기에 매 프레임 실행할 로직 추가 (없어도 이 함수는 있어야 함)
+    UpdateGameTime();
+}
+
+void UMainHUDWidget::AutoSaveTime()
+{
+    // 하늘 액터가 없으면 저장 불가
+    if (!SkyActor) return;
+
+    // 1. 하늘 액터에서 현재 시간 값(float) 읽어오기
+    float CurrentSkyTime = -1.0f;
+    FProperty* Prop = SkyActor->GetClass()->FindPropertyByName(TEXT("Current Time of Day"));
+    
+    if (Prop)
+    {
+        if (FNumericProperty* NumericProp = CastField<FNumericProperty>(Prop))
+        {
+            void* ValuePtr = NumericProp->ContainerPtrToValuePtr<void>(SkyActor);
+            if (NumericProp->IsFloatingPoint())
+            {
+                CurrentSkyTime = NumericProp->GetFloatingPointPropertyValue(ValuePtr);
+            }
+        }
+    }
+
+    // 값을 못 읽었으면 중단
+    if (CurrentSkyTime < 0.0f) return;
+
+    // 2. GameInstance에 저장 요청 보내기
+    UMyGameInstance* GI = Cast<UMyGameInstance>(GetGameInstance());
+    if (GI)
+    {
+        GI->SaveSkyTime(CurrentSkyTime);
+        // (선택사항) 화면에 로그 띄우기 - 너무 자주 뜨면 주석 처리하세요
+        // if(GEngine) GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Yellow, TEXT("Auto Saving Time..."));
     }
 }

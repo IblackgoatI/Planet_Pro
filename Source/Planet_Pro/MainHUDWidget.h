@@ -81,6 +81,12 @@ private:
 	// 시간을 업데이트하는 내부 함수
 	void UpdateGameTime();
 	
-	// C++ 내부에서 계산할 진짜 게임 시간 (0 ~ 2400)
-	float InternalGameTime = 800.0f; // 기본값: 아침 8시
+	// C++ 내부에서 계산할 진짜 게임 시간
+	float InternalGameTime = 800.0f;
+
+	// =========================================================
+	// ★ [추가] 자동 저장용 타이머 변수와 함수 선언
+	// =========================================================
+	FTimerHandle TimerHandle_AutoSave;
+	void AutoSaveTime();
 };
