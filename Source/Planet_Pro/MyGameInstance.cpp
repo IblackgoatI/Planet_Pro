@@ -139,6 +139,19 @@ void UMyGameInstance::LoadSkyTime()
 
 void UMyGameInstance::OnLoadTimeSuccess(const PlayFab::ClientModels::FGetUserDataResult& Result)
 {
+    if (Result.Data.Contains(TEXT("SkyTime")))
+    {
+        FString TimeString = Result.Data[TEXT("SkyTime")].Value;
+        SavedSkyTime = FCString::Atof(*TimeString);
+
+        // ★ [핵심] "데이터 도착했어! 가져가서 써!" 하고 방송하기
+        if (OnSkyTimeLoaded.IsBound())
+        {
+            OnSkyTimeLoaded.Broadcast(SavedSkyTime);
+        }
+        
+        UE_LOG(LogTemp, Log, TEXT("방송 송출 완료: %f"), SavedSkyTime);
+    }
     // 1. 데이터가 있는지 확인
     if (Result.Data.Contains(TEXT("SkyTime")))
     {

@@ -8,6 +8,8 @@
 #include "PlayFabError.h" // 에러 처리를 위해 필요
 #include "MyGameInstance.generated.h"
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnSkyTimeLoaded, float, LoadedTime);
+
 // 아이템 데이터 구조체
 USTRUCT(BlueprintType)
 struct FItemData
@@ -19,7 +21,7 @@ public:
 	FName ItemID;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Inventory")
-	int32 Amount;
+	int32 Amount = 0;
 };
 
 UCLASS()
@@ -60,6 +62,10 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "TimeSystem")
 	void LoadSkyTime();
+	
+	// [추가] "시간 로드 완료되면 알려줄게!" 하는 방송국(이벤트)
+	UPROPERTY(BlueprintAssignable, Category = "PlayFab")
+	FOnSkyTimeLoaded OnSkyTimeLoaded;
 
 private:
 	// 콜백 함수들

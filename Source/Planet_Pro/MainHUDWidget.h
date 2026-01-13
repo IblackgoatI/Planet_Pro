@@ -73,6 +73,9 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GameTime")
 	float TimeOffsetHours = 6.0f;
 	
+	UFUNCTION()
+	void ApplySkyTime(float LoadedTime);
+	
 private:
 	// 하늘 액터를 찾아서 저장해둘 변수
 	UPROPERTY()

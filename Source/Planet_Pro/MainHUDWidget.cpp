@@ -9,6 +9,33 @@
 #include "UObject/UnrealType.h"
 #include "Misc/OutputDeviceNull.h"
 
+void UMainHUDWidget::ApplySkyTime(float LoadedTime)
+{
+    if (!SkyActor) return;
+
+    // 1. 호출할 함수 이름: "MC_SetTimeSmoothly"
+    // 2. 인자 1 (시간): LoadedTime
+    // 3. 인자 2 (속도): 10000.0 (즉시 바뀌도록 아주 빠른 속도 입력)
+    
+    FString Cmd = FString::Printf(TEXT("MC_SetTimeSmoothly %f 10000.0"), LoadedTime);
+    
+    // 블루프린트 함수 강제 호출을 위한 도구
+    FOutputDeviceNull ar;
+    
+    // 실행!
+    bool bResult = SkyActor->CallFunctionByNameWithArguments(*Cmd, ar, nullptr, true);
+
+    if (bResult)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("✅ [성공] MC_SetTimeSmoothly 호출함! 시간: %f"), LoadedTime);
+    }
+    else
+    {
+        // 만약 실패하면 이름 문제일 수 있으니 로그 띄우기
+        UE_LOG(LogTemp, Error, TEXT("❌ [실패] 함수를 못 찾음. 'MC_SetTimeSmoothly'가 맞는지 재확인 필요."));
+    }
+}
+
 void UMainHUDWidget::ToggleInventory()
 {
     if (!InventoryWindow) return;
@@ -160,14 +187,30 @@ void UMainHUDWidget::NativeConstruct()
             break;
         }
     }
-
-    // 2. [중요] 게임 켜질 때 시간 강제 설정 (아침 8시)
-    // 저장된 데이터가 0으로 만들든 말든, 여기서 800으로 덮어씁니다.
-    InternalGameTime = 800.0f; 
+    // 2. GameInstance 가져오기
+    UMyGameInstance* GI = Cast<UMyGameInstance>(GetGameInstance());
+    if (GI)
+    {
+        // [경우의 수 1] 이미 데이터가 로드되어 있는 경우 (로비 갔다 왔을 때 등)
+        if (GI->SavedSkyTime >= 0.0f)
+        {
+            ApplySkyTime(GI->SavedSkyTime); // 즉시 적용
+        }
+        // [경우의 수 2] 아직 데이터가 안 온 경우 (게임 처음 켰을 때)
+        else
+        {
+            // "나중에 데이터 오면 ApplySkyTime 함수 실행해줘" 라고 예약
+            GI->OnSkyTimeLoaded.AddDynamic(this, &UMainHUDWidget::ApplySkyTime);
+            
+            // 로드 요청 보내기
+            GI->LoadSkyTime(); 
+        }
+    }
     
+    // 자동 저장 타이머 시작
     GetWorld()->GetTimerManager().SetTimer(TimerHandle_AutoSave, this, &UMainHUDWidget::AutoSaveTime, 60.0f, true);
-    
 }
+
 
 void UMainHUDWidget::UpdateGameTime()
 {
