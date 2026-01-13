@@ -2,6 +2,11 @@
 #include "ItemSlotWidget.h"
 #include "Components/HorizontalBox.h" 
 #include "Components/UniformGridSlot.h" // [필수] 행/열 계산을 위해 필요
+#include "Components/TextBlock.h"
+#include "Components/Image.h"
+#include "Kismet/GameplayStatics.h"
+#include "UObject/UnrealType.h"
+#include "Misc/OutputDeviceNull.h"
 
 void UMainHUDWidget::ToggleInventory()
 {
@@ -135,5 +140,117 @@ void UMainHUDWidget::UpdateQuickSlotHighlight(int32 SelectedIndex)
                 SlotWidget->SetIsSelected(false); // 너는 작아져라!
             }
         }
+    }
+}
+
+void UMainHUDWidget::NativeConstruct()
+{
+    Super::NativeConstruct();
+
+    // 1. 하늘 액터 찾기
+    TArray<AActor*> FoundActors;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AActor::StaticClass(), FoundActors);
+
+    for (AActor* Actor : FoundActors)
+    {
+        if (Actor->GetName().Contains(TEXT("StylizedSky")))
+        {
+            SkyActor = Actor;
+            break;
+        }
+    }
+
+    // 2. [중요] 게임 켜질 때 시간 강제 설정 (아침 8시)
+    // 저장된 데이터가 0으로 만들든 말든, 여기서 800으로 덮어씁니다.
+    InternalGameTime = 800.0f; 
+}
+
+void UMainHUDWidget::UpdateGameTime()
+{
+    if (!SkyActor || !Txt_GameTime || !Img_SunMoon) return;
+
+    // -------------------------------------------------------
+    // [1] 하늘 에셋의 진짜 시간(Current Time of Day) 훔쳐오기
+    // -------------------------------------------------------
+    float CurrentSkyTime = 0.0f;
+
+    // ★수정됨★: 스크린샷에서 확인한 정확한 변수 이름 "Current Time of Day"를 넣었습니다.
+    FProperty* Prop = SkyActor->GetClass()->FindPropertyByName(TEXT("Current Time of Day"));
+    
+    if (Prop)
+    {
+        // 변수 값을 읽어옵니다 (리포터 모드!)
+        if (FNumericProperty* NumericProp = CastField<FNumericProperty>(Prop))
+        {
+            void* ValuePtr = NumericProp->ContainerPtrToValuePtr<void>(SkyActor);
+            if (NumericProp->IsFloatingPoint())
+            {
+                CurrentSkyTime = NumericProp->GetFloatingPointPropertyValue(ValuePtr);
+            }
+        }
+    }
+    else
+    {
+        // 혹시 못 찾으면 로그 띄우기 (디버깅용)
+        GEngine->AddOnScreenDebugMessage(-1, 0.0f, FColor::Red, TEXT("변수 못 찾음! 'Current Time of Day' 확인 필요"));
+    }
+
+    // -------------------------------------------------------
+    // [2] UI 표시 (비율 계산 및 텍스트 변환)
+    // -------------------------------------------------------
+    // 테스트 맵 설정(Day: 50 + Night: 40 = 총 90)에 맞춰서 24시간제로 변환합니다.
+    
+    // [비율 계산]
+    float TotalCycleDuration = 90.0f; // Day(50) + Night(40)
+    float NormalizedTime24 = (CurrentSkyTime / TotalCycleDuration) * 24.0f;
+
+    // ★수정 포인트★: 하늘 에셋의 0.0은 0시가 아니라 "아침 6시"입니다.
+    // 그래서 계산된 결과에 6시간을 더해줍니다.
+    NormalizedTime24 += 6.0f; 
+
+    // 24시 넘으면 0시부터 다시 시작 (예: 25시 -> 1시)
+    if (NormalizedTime24 >= 24.0f)
+    {
+        NormalizedTime24 -= 24.0f;
+    }
+
+    // 1. 시(Hour)
+    int32 Hour24 = (int32)NormalizedTime24;
+    
+    // 2. 분(Minute)
+    float MinuteFloat = (NormalizedTime24 - Hour24) * 60.0f;
+    int32 Minute = (int32)MinuteFloat;
+
+    // 3. 초(Second)
+    int32 Second = (int32)((MinuteFloat - Minute) * 60.0f);
+
+    // 24시 넘는 경우 방어
+    Hour24 = Hour24 % 24;
+
+    // 4. AM/PM 변환
+    int32 Hour12 = Hour24;
+    FString Period = TEXT("am");
+    
+    if (Hour24 >= 12)
+    {
+        Period = TEXT("pm");
+        if (Hour24 > 12) Hour12 -= 12; // 13시 -> 1시
+    }
+    if (Hour12 == 0) Hour12 = 12;
+
+    // 텍스트 출력
+    FString TimeString = FString::Printf(TEXT("%02d:%02d:%02d %s"), Hour12, Minute, Second, *Period);
+    Txt_GameTime->SetText(FText::FromString(TimeString));
+
+    // 아이콘 변경
+    if (Hour24 >= 6 && Hour24 < 20)
+    {
+        if (Icon_Sun && Img_SunMoon->GetBrush().GetResourceObject() != Icon_Sun)
+            Img_SunMoon->SetBrushFromTexture(Icon_Sun);
+    }
+    else
+    {
+        if (Icon_Moon && Img_SunMoon->GetBrush().GetResourceObject() != Icon_Moon)
+            Img_SunMoon->SetBrushFromTexture(Icon_Moon);
     }
 }
