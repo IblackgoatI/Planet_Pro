@@ -25,7 +25,11 @@ protected:
 public:
 	// [UI 바인딩] 에디터의 위젯 이름과 똑같아야 합니다!
 	UPROPERTY(meta = (BindWidget))
-	UTextBlock* Txt_GameTime;
+	class UTextBlock* Txt_GameTime;
+
+	// ★추가★: 오전/오후 전용 텍스트 상자
+	UPROPERTY(meta = (BindWidget))
+	class UTextBlock* Txt_AmPm;
 
 	UPROPERTY(meta = (BindWidget))
 	UImage* Img_SunMoon;
@@ -63,6 +67,11 @@ public:
 	// 이 숫자를 바꾸면 시간 속도가 변합니다!
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GameTime")
 	float RealMinutesPerDay = 5.0f;
+	
+	// [설정] 에셋의 0.0이 실제 몇 시인가요? (예: 6.0 = 아침 6시)
+	// 이 값을 바꾸면 HUD 시간의 "기준점"이 달라집니다.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GameTime")
+	float TimeOffsetHours = 6.0f;
 	
 private:
 	// 하늘 액터를 찾아서 저장해둘 변수

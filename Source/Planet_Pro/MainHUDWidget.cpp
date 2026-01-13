@@ -205,8 +205,8 @@ void UMainHUDWidget::UpdateGameTime()
     float NormalizedTime24 = (CurrentSkyTime / TotalCycleDuration) * 24.0f;
 
     // ★수정 포인트★: 하늘 에셋의 0.0은 0시가 아니라 "아침 6시"입니다.
-    // 그래서 계산된 결과에 6시간을 더해줍니다.
-    NormalizedTime24 += 6.0f; 
+    // 이제 에디터에서 이 값을 0으로 하면 "0.0 = 자정", 6으로 하면 "0.0 = 6시"가 됩니다.
+    NormalizedTime24 += TimeOffsetHours;
 
     // 24시 넘으면 0시부터 다시 시작 (예: 25시 -> 1시)
     if (NormalizedTime24 >= 24.0f)
@@ -239,8 +239,17 @@ void UMainHUDWidget::UpdateGameTime()
     if (Hour12 == 0) Hour12 = 12;
 
     // 텍스트 출력
-    FString TimeString = FString::Printf(TEXT("%02d:%02d:%02d %s"), Hour12, Minute, Second, *Period);
-    Txt_GameTime->SetText(FText::FromString(TimeString));
+    FString TimeString = FString::Printf(TEXT("%02d:%02d"), Hour12, Minute);
+    if (Txt_GameTime)
+    {
+        Txt_GameTime->SetText(FText::FromString(TimeString));
+    }
+
+    // 2. AM/PM 상자에는 "pm" 만 넣음 (얘는 이제 안 움직임!)
+    if (Txt_AmPm)
+    {
+        Txt_AmPm->SetText(FText::FromString(Period));
+    }
 
     // 아이콘 변경
     if (Hour24 >= 6 && Hour24 < 20)
