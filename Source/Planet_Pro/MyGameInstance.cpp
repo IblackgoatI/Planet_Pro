@@ -1,12 +1,14 @@
+// MyGameInstance.cpp
+
 #include "MyGameInstance.h"
 #include "Json.h"
 #include "JsonObjectConverter.h"
 
-// [핵심 수정] PlayFab 헤더 순서 및 파일명 변경
+// PlayFab 관련
 #include "PlayFab.h"
 #include "Core/PlayFabClientDataModels.h"
 #include "Core/PlayFabClientAPI.h"
-#include "PlayFabError.h" // <--- FPlayFabError 정의가 여기 들어있습니다.
+#include "PlayFabError.h"
 
 void UMyGameInstance::AddOrUpdateItem(FName InItemID, int32 InAmount)
 {
@@ -48,18 +50,14 @@ TMap<FString, FString> UMyGameInstance::GetInventoryMapForPlayFab()
     return DataMap;
 }
 
-// [핵심] 저장 함수
+// [인벤토리 저장]
 void UMyGameInstance::SaveInventoryToPlayFab_CPP()
 {
-    // 1. JSON 문자열 만들기
     FString JsonString = GetInventoryAsJsonString();
     
-    // 2. 요청서 만들기
-    // (여기는 PlayFab::ClientModels:: 가 맞습니다. 이건 확실합니다.)
     PlayFab::ClientModels::FUpdateUserDataRequest Request;
     Request.Data.Add(TEXT("Inventory"), JsonString);
 
-    // 3. API 모듈 가져오기
     auto ClientAPI = IPlayFabModuleInterface::Get().GetClientAPI();
     if (!ClientAPI.IsValid()) return;
 
@@ -70,7 +68,6 @@ void UMyGameInstance::SaveInventoryToPlayFab_CPP()
                 if(GEngine) GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Green, TEXT("C++: Save Success!"));
             }
         ),
-        // ★★★ [수정됨] 람다 인자 타입 변경 ★★★
         PlayFab::FPlayFabErrorDelegate::CreateLambda(
             [](const PlayFab::FPlayFabCppError& Error) 
             {
@@ -84,83 +81,61 @@ void UMyGameInstance::SaveInventoryToPlayFab_CPP()
     );
 }
 
-// [1. 시간 저장 함수 수정]
+// [1. 시간 저장 함수]
 void UMyGameInstance::SaveSkyTime(float CurrentTime)
 {
-    // 1. API 모듈 가져오기 (이게 제일 중요! Static 호출 대신 이걸 쓰세요)
     auto ClientAPI = IPlayFabModuleInterface::Get().GetClientAPI();
     
-    // API가 유효하지 않으면 중단
     if (!ClientAPI.IsValid()) 
     {
         UE_LOG(LogTemp, Error, TEXT("PlayFab ClientAPI is invalid!"));
         return;
     }
 
-    // 2. 요청서 만들기
     PlayFab::ClientModels::FUpdateUserDataRequest Request;
     FString TimeString = FString::SanitizeFloat(CurrentTime);
     Request.Data.Add(TEXT("SkyTime"), TimeString);
 
-    // 3. API 호출 (인스턴스 방식)
     ClientAPI->UpdateUserData(
         Request,
-        // 성공 델리게이트
         PlayFab::UPlayFabClientAPI::FUpdateUserDataDelegate::CreateUObject(this, &UMyGameInstance::OnSaveTimeSuccess),
-        
-        // ★★★ [수정 포인트] 에러 델리게이트 ★★★
-        // PlayFab::UPlayFabClientAPI::FPlayFabErrorDelegate (X) -> 중간에 클래스 이름 뺴세요.
-        // PlayFab::FPlayFabErrorDelegate (O) -> 이게 맞습니다.
         PlayFab::FPlayFabErrorDelegate::CreateUObject(this, &UMyGameInstance::OnTimeError)
     );
 }
 
-// [2. 시간 로드 함수 수정]
+// [2. 시간 로드 함수]
 void UMyGameInstance::LoadSkyTime()
 {
-    // 1. API 모듈 가져오기
     auto ClientAPI = IPlayFabModuleInterface::Get().GetClientAPI();
-
     if (!ClientAPI.IsValid()) return;
 
-    // 2. 요청서 만들기
     PlayFab::ClientModels::FGetUserDataRequest Request;
     Request.Keys.Add(TEXT("SkyTime"));
 
-    // 3. API 호출
     ClientAPI->GetUserData(
         Request,
         PlayFab::UPlayFabClientAPI::FGetUserDataDelegate::CreateUObject(this, &UMyGameInstance::OnLoadTimeSuccess),
-        
-        // ★★★ [수정 포인트] 에러 델리게이트 ★★★
         PlayFab::FPlayFabErrorDelegate::CreateUObject(this, &UMyGameInstance::OnTimeError)
     );
 }
 
+// [로드 성공 처리 - 핵심 수정됨]
 void UMyGameInstance::OnLoadTimeSuccess(const PlayFab::ClientModels::FGetUserDataResult& Result)
 {
+    // 데이터가 있는지 확인
     if (Result.Data.Contains(TEXT("SkyTime")))
     {
         FString TimeString = Result.Data[TEXT("SkyTime")].Value;
         SavedSkyTime = FCString::Atof(*TimeString);
 
-        // ★ [핵심] "데이터 도착했어! 가져가서 써!" 하고 방송하기
+        UE_LOG(LogTemp, Warning, TEXT("📥 [PlayFab] 시간 로드 완료: %f"), SavedSkyTime);
+        if(GEngine) GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Cyan, FString::Printf(TEXT("📥 시간 로드됨: %f"), SavedSkyTime));
+
+        // ★ [핵심] "데이터 도착했어!" 하고 방송하기
         if (OnSkyTimeLoaded.IsBound())
         {
             OnSkyTimeLoaded.Broadcast(SavedSkyTime);
         }
-        
-        UE_LOG(LogTemp, Log, TEXT("방송 송출 완료: %f"), SavedSkyTime);
-    }
-    // 1. 데이터가 있는지 확인
-    if (Result.Data.Contains(TEXT("SkyTime")))
-    {
-        // 2. String -> float 변환
-        FString TimeString = Result.Data[TEXT("SkyTime")].Value;
-        SavedSkyTime = FCString::Atof(*TimeString);
-
-        UE_LOG(LogTemp, Log, TEXT("📥 [PlayFab] 시간 로드 완료: %f"), SavedSkyTime);
-        if(GEngine) GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Cyan, FString::Printf(TEXT("📥 시간 로드됨: %f"), SavedSkyTime));
     }
     else
     {
@@ -178,7 +153,6 @@ void UMyGameInstance::OnTimeError(const PlayFab::FPlayFabCppError& ErrorResult)
 
 void UMyGameInstance::OnSaveTimeSuccess(const PlayFab::ClientModels::FUpdateUserDataResult& Result)
 {
-    // 성공 로그 출력
     if(GEngine) GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Green, TEXT("✅ [PlayFab] 시간 저장 성공!"));
     UE_LOG(LogTemp, Log, TEXT("PlayFab Time Save Success!"));
 }
