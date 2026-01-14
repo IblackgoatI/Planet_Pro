@@ -320,6 +320,11 @@ void UMainHUDWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 
 void UMainHUDWidget::AutoSaveTime()
 {
+    APlayerController* PC = GetOwningPlayer();
+    if (!PC || !PC->HasAuthority()) 
+    {
+        return; // "난 게스트네? 저장 안 해!" (함수 종료)
+    }
     // 하늘 액터가 없으면 저장 불가
     if (!SkyActor) return;
 

@@ -22,6 +22,13 @@ void APlanetPlayerController::BeginPlay()
 
 void APlanetPlayerController::ForceSkyUpdate()
 {
+	if (!HasAuthority()) 
+	{
+		// 단, 클라이언트도 화면은 밝혀줘야 게임을 하겠죠?
+		FadeInScreen(); 
+		return; 
+	}
+	
 	// 1. GameInstance 확인
 	UMyGameInstance* GI = Cast<UMyGameInstance>(UGameplayStatics::GetGameInstance(GetWorld()));
 	if (!GI) 
