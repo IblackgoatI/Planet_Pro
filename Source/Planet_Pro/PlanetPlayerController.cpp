@@ -1,11 +1,9 @@
-// PlanetPlayerController.cpp
-
 #include "PlanetPlayerController.h"
 #include "Kismet/GameplayStatics.h"
 #include "Camera/PlayerCameraManager.h"
-#include "EngineUtils.h" // TActorIterator
-#include "MyGameInstance.h" // 헤더 이름 꼭 확인!
-#include "Misc/OutputDeviceNull.h"
+#include "EngineUtils.h" 
+#include "MyGameInstance.h" 
+#include "Misc/OutputDeviceNull.h" // CallFunctionByNameWithArguments용
 
 void APlanetPlayerController::BeginPlay()
 {
@@ -24,87 +22,95 @@ void APlanetPlayerController::BeginPlay()
 
 void APlanetPlayerController::ForceSkyUpdate()
 {
-    // 1. GameInstance 확인 및 데이터 로드 요청 (기존 로직 유지)
-    UMyGameInstance* GI = Cast<UMyGameInstance>(UGameplayStatics::GetGameInstance(GetWorld()));
-    if (!GI) 
-    {
-        FadeInScreen();
-        return;
-    }
+	// 1. GameInstance 확인
+	UMyGameInstance* GI = Cast<UMyGameInstance>(UGameplayStatics::GetGameInstance(GetWorld()));
+	if (!GI) 
+	{
+		FadeInScreen();
+		return;
+	}
 
-    if (GI->SavedSkyTime < 0.0f)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("⏳ [C++] 아직 시간이 로드되지 않음. 대기합니다..."));
-        GI->OnSkyTimeLoaded.RemoveDynamic(this, &APlanetPlayerController::OnSkyTimeLoadedReceived);
-        GI->OnSkyTimeLoaded.AddDynamic(this, &APlanetPlayerController::OnSkyTimeLoadedReceived);
-        GI->LoadSkyTime();
-        return; 
-    }
+	// 2. 데이터가 아직 없다면? (-1.0f) -> 요청 보내기
+	if (GI->SavedSkyTime < 0.0f)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("⏳ [C++] 아직 시간이 로드되지 않음. 대기합니다..."));
+		
+		// 방송 수신 대기
+		GI->OnSkyTimeLoaded.RemoveDynamic(this, &APlanetPlayerController::OnSkyTimeLoadedReceived);
+		GI->OnSkyTimeLoaded.AddDynamic(this, &APlanetPlayerController::OnSkyTimeLoadedReceived);
+		
+		// ★ 데이터 요청!
+		GI->LoadSkyTime(); 
+		return; 
+	}
 
-    float TargetTime = GI->SavedSkyTime;
-    UE_LOG(LogTemp, Warning, TEXT("🚀 [C++] 저장된 시간 적용 시작: %f"), TargetTime);
+	float TargetTime = GI->SavedSkyTime;
+	UE_LOG(LogTemp, Warning, TEXT("🚀 [C++] 저장된 시간 적용 시작: %f"), TargetTime);
 
-    // 2. 하늘 액터 찾기
-    AActor* SkyActor = nullptr;
-    for (TActorIterator<AActor> It(GetWorld()); It; ++It)
-    {
-        if (It->GetName().Contains(TEXT("StylizedSky")))
-        {
-            SkyActor = *It;
-            break;
-        }
-    }
+	// 3. 하늘 액터 찾기
+	AActor* SkyActor = nullptr;
+	for (TActorIterator<AActor> It(GetWorld()); It; ++It)
+	{
+		if (It->GetName().Contains(TEXT("StylizedSky")))
+		{
+			SkyActor = *It;
+			break;
+		}
+	}
 
-    if (SkyActor)
-    {
-        // =========================================================
-        // [1] 안전장치: 변수 값 직접 주입 (혹시 모르니 해둠)
-        // =========================================================
-        FProperty* FoundProp = SkyActor->GetClass()->FindPropertyByName(TEXT("CurrentTimeOfDay"));
-        if (!FoundProp) FoundProp = SkyActor->GetClass()->FindPropertyByName(TEXT("Current Time of Day"));
-        
-        if (FoundProp)
-        {
-            if (FNumericProperty* NumProp = CastField<FNumericProperty>(FoundProp))
-            {
-                if (NumProp->IsFloatingPoint())
-                {
-                    void* ValuePtr = NumProp->ContainerPtrToValuePtr<void>(SkyActor);
-                    NumProp->SetFloatingPointPropertyValue(ValuePtr, TargetTime);
-                    UE_LOG(LogTemp, Warning, TEXT("✅ [C++] 변수 값 직접 주입 완료."));
-                }
-            }
-        }
+	if (SkyActor)
+	{
+		// [1] 안전장치: 변수 값 직접 주입
+		FProperty* FoundProp = SkyActor->GetClass()->FindPropertyByName(TEXT("CurrentTimeOfDay"));
+		if (!FoundProp) FoundProp = SkyActor->GetClass()->FindPropertyByName(TEXT("Current Time of Day"));
+		
+		if (FoundProp)
+		{
+			if (FNumericProperty* NumProp = CastField<FNumericProperty>(FoundProp))
+			{
+				if (NumProp->IsFloatingPoint())
+				{
+					void* ValuePtr = NumProp->ContainerPtrToValuePtr<void>(SkyActor);
+					NumProp->SetFloatingPointPropertyValue(ValuePtr, TargetTime);
+				}
+			}
+		}
 
-        // =========================================================
-        // [2] ★핵심 해결책★: 사진에 있던 함수 강제 실행!
-        // 함수명: SetNewTimeSmooth
-        // 인자 1: New Time (TargetTime)
-        // 인자 2: Smooth Speed (100000.0 -> 엄청 빠르게 줘서 즉시이동 효과)
-        // =========================================================
-        
-        FOutputDeviceNull Ar;
-        
-        // 명령문 만들기: "함수이름 값1 값2"
-        FString Cmd = FString::Printf(TEXT("SetNewTimeSmooth %f 100000.0"), TargetTime);
-        
-        // 실행!
-        bool bResult = SkyActor->CallFunctionByNameWithArguments(*Cmd, Ar, nullptr, true);
+		// [2] ★핵심★: SetNewTimeSmooth 강제 실행 (순간이동)
+		FOutputDeviceNull Ar;
+		FString Cmd = FString::Printf(TEXT("SetNewTimeSmooth %f 100000.0"), TargetTime);
+		bool bResult = SkyActor->CallFunctionByNameWithArguments(*Cmd, Ar, nullptr, true);
 
-        if (bResult)
-        {
-            UE_LOG(LogTemp, Warning, TEXT("⚡ [C++] SetNewTimeSmooth 강제 호출 성공! (순간이동)"));
-        }
-        else
-        {
-            // 혹시 함수 이름이 다를까봐 다른 후보들도 찔러봅니다.
-            SkyActor->CallFunctionByNameWithArguments(TEXT("UserConstructionScript"), Ar, nullptr, true);
-            SkyActor->CallFunctionByNameWithArguments(TEXT("UpdateSun"), Ar, nullptr, true);
-            UE_LOG(LogTemp, Warning, TEXT("⚠️ [C++] SetNewTimeSmooth 호출 실패. 대신 ConstructionScript 실행함."));
-        }
-    }
+		if (bResult)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("⚡ [C++] SetNewTimeSmooth 강제 호출 성공!"));
+		}
+		else
+		{
+			// 실패 시 대체 수단들
+			SkyActor->CallFunctionByNameWithArguments(TEXT("UserConstructionScript"), Ar, nullptr, true);
+			SkyActor->CallFunctionByNameWithArguments(TEXT("UpdateSun"), Ar, nullptr, true);
+		}
+	}
 
-    // 3. 화면 개방 (페이드 인)
-    FTimerHandle FadeHandle;
-    GetWorldTimerManager().SetTimer(FadeHandle, this, &APlanetPlayerController::FadeInScreen, 0.5f, false);
+	// 4. 화면 개방
+	FTimerHandle FadeHandle;
+	GetWorldTimerManager().SetTimer(FadeHandle, this, &APlanetPlayerController::FadeInScreen, 0.5f, false);
+}
+
+// ★ 누락되었던 함수 1: 데이터 도착하면 다시 실행
+void APlanetPlayerController::OnSkyTimeLoadedReceived(float LoadedTime)
+{
+	UE_LOG(LogTemp, Warning, TEXT("📨 [C++] 데이터 도착 알림 받음! 다시 시간 설정 시도."));
+	ForceSkyUpdate();
+}
+
+// ★ 누락되었던 함수 2: 화면 밝히기
+void APlanetPlayerController::FadeInScreen()
+{
+	if (PlayerCameraManager)
+	{
+		PlayerCameraManager->StartCameraFade(1.0f, 0.0f, 2.0f, FLinearColor::Black, false, false);
+		UE_LOG(LogTemp, Warning, TEXT("✨ [C++] 로딩 완료. 화면 개방."));
+	}
 }
