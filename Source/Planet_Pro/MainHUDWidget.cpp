@@ -183,34 +183,33 @@ void UMainHUDWidget::NativeConstruct()
     {
         if (Actor->GetName().Contains(TEXT("StylizedSky")))
         {
-               SkyActor = Actor;
+            SkyActor = Actor;
             break;
         }
     }
-    // 2. GameInstance 가져오기
+
+    // ▼▼▼▼▼▼▼ [삭제 또는 주석 처리 구간] ▼▼▼▼▼▼▼
+    /*
+    // UI는 더 이상 시간을 건드리지 않습니다! (C++ PlayerController가 다 함)
     UMyGameInstance* GI = Cast<UMyGameInstance>(GetGameInstance());
     if (GI)
     {
-        // [경우의 수 1] 이미 데이터가 로드되어 있는 경우 (로비 갔다 왔을 때 등)
         if (GI->SavedSkyTime >= 0.0f)
         {
-            ApplySkyTime(GI->SavedSkyTime); // 즉시 적용
+            ApplySkyTime(GI->SavedSkyTime);
         }
-        // [경우의 수 2] 아직 데이터가 안 온 경우 (게임 처음 켰을 때)
         else
         {
-            // "나중에 데이터 오면 ApplySkyTime 함수 실행해줘" 라고 예약
             GI->OnSkyTimeLoaded.AddDynamic(this, &UMainHUDWidget::ApplySkyTime);
-            
-            // 로드 요청 보내기
             GI->LoadSkyTime(); 
         }
     }
-    
-    // 자동 저장 타이머 시작
+    */
+    // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
+
+    // 자동 저장 타이머 시작 (이건 냅두세요! 저장은 해야죠)
     GetWorld()->GetTimerManager().SetTimer(TimerHandle_AutoSave, this, &UMainHUDWidget::AutoSaveTime, 60.0f, true);
 }
-
 
 void UMainHUDWidget::UpdateGameTime()
 {

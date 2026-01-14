@@ -20,4 +20,7 @@ public:
 
 	// 2. 준비 끝났으니 화면 밝히는 함수
 	void FadeInScreen();
+	
+	UFUNCTION() 
+	void OnSkyTimeLoadedReceived(float LoadedTime);
 };
