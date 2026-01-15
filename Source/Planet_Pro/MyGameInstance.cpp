@@ -10,6 +10,9 @@
 #include "Core/PlayFabClientAPI.h"
 #include "PlayFabError.h"
 
+// ==========================================================
+// 1. 인벤토리 시스템
+// ==========================================================
 void UMyGameInstance::AddOrUpdateItem(FName InItemID, int32 InAmount)
 {
     FItemData* FoundItem = MyInventory.FindByPredicate([&](const FItemData& Item){ return Item.ItemID == InItemID; });
@@ -65,7 +68,7 @@ void UMyGameInstance::SaveInventoryToPlayFab_CPP()
         PlayFab::UPlayFabClientAPI::FUpdateUserDataDelegate::CreateLambda(
             [](const PlayFab::ClientModels::FUpdateUserDataResult& Result)
             {
-                if(GEngine) GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Green, TEXT("C++: Save Success!"));
+                if(GEngine) GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Green, TEXT("C++: Inventory Save Success!"));
             }
         ),
         PlayFab::FPlayFabErrorDelegate::CreateLambda(
@@ -74,12 +77,16 @@ void UMyGameInstance::SaveInventoryToPlayFab_CPP()
                 if(GEngine) 
                 {
                     GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, 
-                        FString::Printf(TEXT("Failed! %s"), *Error.ErrorMessage));
+                        FString::Printf(TEXT("Inventory Save Failed! %s"), *Error.ErrorMessage));
                 }
             }
         )
     );
 }
+
+// ==========================================================
+// 2. 시간 저장/로드 시스템
+// ==========================================================
 
 // [1. 시간 저장 함수]
 void UMyGameInstance::SaveSkyTime(float CurrentTime)
@@ -119,7 +126,20 @@ void UMyGameInstance::LoadSkyTime()
     );
 }
 
-// [로드 성공 처리 - 핵심 수정됨]
+// [저장 성공 콜백 - 핵심 수정됨]
+void UMyGameInstance::OnSaveTimeSuccess(const PlayFab::ClientModels::FUpdateUserDataResult& Result)
+{
+    if(GEngine) GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Green, TEXT("✅ [PlayFab] 시간 저장 성공!"));
+    UE_LOG(LogTemp, Log, TEXT("PlayFab Time Save Success!"));
+
+    // ★ [핵심] "저장 끝났어!" 하고 UI에게 방송하기
+    if (OnSaveSuccess.IsBound())
+    {
+        OnSaveSuccess.Broadcast();
+    }
+}
+
+// [로드 성공 처리]
 void UMyGameInstance::OnLoadTimeSuccess(const PlayFab::ClientModels::FGetUserDataResult& Result)
 {
     // 데이터가 있는지 확인
@@ -131,7 +151,7 @@ void UMyGameInstance::OnLoadTimeSuccess(const PlayFab::ClientModels::FGetUserDat
         UE_LOG(LogTemp, Warning, TEXT("📥 [PlayFab] 시간 로드 완료: %f"), SavedSkyTime);
         if(GEngine) GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Cyan, FString::Printf(TEXT("📥 시간 로드됨: %f"), SavedSkyTime));
 
-        // ★ [핵심] "데이터 도착했어!" 하고 방송하기
+        // ★ [핵심] "데이터 도착했어!" 하고 방송하기 (기존 기능)
         if (OnSkyTimeLoaded.IsBound())
         {
             OnSkyTimeLoaded.Broadcast(SavedSkyTime);
@@ -151,8 +171,6 @@ void UMyGameInstance::OnTimeError(const PlayFab::FPlayFabCppError& ErrorResult)
     if(GEngine) GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, FString::Printf(TEXT("❌ 실패: %s"), *ErrorResult.ErrorMessage));
 }
 
-void UMyGameInstance::OnSaveTimeSuccess(const PlayFab::ClientModels::FUpdateUserDataResult& Result)
-{
-    if(GEngine) GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Green, TEXT("✅ [PlayFab] 시간 저장 성공!"));
-    UE_LOG(LogTemp, Log, TEXT("PlayFab Time Save Success!"));
-}
+// (사용되지 않는 기존 함수들 더미 구현 - 컴파일 에러 방지용)
+void UMyGameInstance::OnUpdateUserDataSuccess(const PlayFab::ClientModels::FUpdateUserDataResult& Result) {}
+void UMyGameInstance::OnUpdateUserDataError(const PlayFab::FPlayFabCppError& ErrorResult) {}
