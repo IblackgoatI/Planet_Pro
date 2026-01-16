@@ -77,7 +77,7 @@ DerivedDataCache/*
 #Content 폴더 내 개발자 임시파일
 Content/Collections/
 Content/Developers/
-Content/__ExternalObjects__/
 
-#jetbrain 설정 파일 무시
+# jetbrain 설정 파일 무시 (Rider)
 .idea/
+*.sln.DotSettings.user
