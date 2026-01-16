@@ -399,3 +399,23 @@ void AMyCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompone
 	PlayerInputComponent->BindAction("QuickSlot7", IE_Pressed, this, &AMyCharacter::OnQuickSlot7);
 	PlayerInputComponent->BindAction("QuickSlot8", IE_Pressed, this, &AMyCharacter::OnQuickSlot8);
 }
+
+void AMyCharacter::UpdateWeaponVisuals()
+{
+	// 1. 블루프린트에서 연결한 메쉬가 없으면 중단
+	if (!WeaponMeshComp) return;
+
+	// 2. 현재 선택된 슬롯 번호가 유효한지 체크
+	if (Inventory.IsValidIndex(CurrentSelectedSlotIndex))
+	{
+		// 3. 선택된 아이템이 "Axe" 인지 확인
+		if (Inventory[CurrentSelectedSlotIndex].ItemID == FName("Axe"))
+		{
+			WeaponMeshComp->SetVisibility(true); // 도끼면 보이게!
+			return;
+		}
+	}
+
+	// 4. 도끼가 아니거나 빈 슬롯이면 숨김
+	WeaponMeshComp->SetVisibility(false);
+}
