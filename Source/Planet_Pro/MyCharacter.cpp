@@ -67,6 +67,9 @@ void AMyCharacter::BeginPlay()
 		PlayFab::ClientModels::FLoginWithCustomIDRequest Request;
 		FString PCName = FPlatformProcess::ComputerName();
 		Request.CustomId = PCName; 
+
+		//새로운 유저 추가
+		Request.CreateAccount = true;
         
 		UE_LOG(LogTemp, Warning, TEXT("💻 현재 컴퓨터 이름(%s)으로 로그인을 시도합니다."), *PCName);
 
