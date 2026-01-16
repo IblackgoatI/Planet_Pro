@@ -65,8 +65,10 @@ void AMyCharacter::BeginPlay()
 		UE_LOG(LogTemp, Warning, TEXT("⚠️ [PlayFab] 로그인 안 됨! 테스트용 자동 로그인을 시도합니다..."));
 
 		PlayFab::ClientModels::FLoginWithCustomIDRequest Request;
-		Request.CustomId = TEXT("TestUser_01");
-		Request.CreateAccount = true;
+		FString PCName = FPlatformProcess::ComputerName();
+		Request.CustomId = PCName; 
+        
+		UE_LOG(LogTemp, Warning, TEXT("💻 현재 컴퓨터 이름(%s)으로 로그인을 시도합니다."), *PCName);
 
 		ClientAPI->LoginWithCustomID(Request,
 			PlayFab::UPlayFabClientAPI::FLoginWithCustomIDDelegate::CreateLambda(
