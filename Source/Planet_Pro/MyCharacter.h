@@ -76,4 +76,14 @@ public:
 	void OnLoadSuccess(const PlayFab::ClientModels::FGetUserDataResult& Result);\
 	// [추가] 불러오기 실패 시 처리
 	void OnLoadError(const PlayFab::FPlayFabCppError& ErrorResult);
+	
+	// [추가] 도끼(무기) 메쉬를 제어하기 위한 변수
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weapon")
+	UStaticMeshComponent* WeaponMeshComp;
+
+	// [추가] =키 눌러서 도끼 얻는 치트 함수
+	void GetAxeCheat();
+    
+	// [추가] 퀵슬롯 선택 시 무기 보여줄지 말지 결정하는 함수
+	void UpdateWeaponVisuals();
 };
