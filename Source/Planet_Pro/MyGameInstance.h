@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "AdvancedFriendsGameInstance.h" // 👈 이거 추가
 #include "Engine/GameInstance.h"
 #include "PlayFab.h"
 #include "Core/PlayFabClientDataModels.h"
@@ -32,7 +33,7 @@ public:
 };
 
 UCLASS()
-class PLANET_PRO_API UMyGameInstance : public UGameInstance
+class PLANET_PRO_API UMyGameInstance : public UAdvancedFriendsGameInstance
 {
 	GENERATED_BODY()
 
