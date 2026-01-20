@@ -6,6 +6,7 @@ public class Planet_Pro : ModuleRules
 {
 	public Planet_Pro(ReadOnlyTargetRules Target) : base(Target)
 	{
+		PrivateDependencyModuleNames.AddRange(new string[] { "AdvancedSessions" });
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 
 		PublicDependencyModuleNames.AddRange(new string[] { 
