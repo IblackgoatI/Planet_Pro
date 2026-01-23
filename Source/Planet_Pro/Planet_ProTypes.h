@@ -4,6 +4,26 @@
 #include "Engine/DataTable.h"
 #include "Planet_ProTypes.generated.h"
 
+USTRUCT(BlueprintType)
+struct FCharacterCustomizationData
+{
+	GENERATED_BODY()
+
+public:
+	// 기본값 0으로 초기화 (안 하면 쓰레기값 들어갈 수 있음)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Customization")
+	int32 BodyIndex = 0;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Customization")
+	int32 EyeIndex = 0;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Customization")
+	int32 MouthIndex = 0;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Customization")
+	int32 MachineIndex = 0;
+};
+
 // [인벤토리용] 내 가방 속 아이템 정보 (이름 변경됨!)
 USTRUCT(BlueprintType)
 struct FPlanetItemInfo
