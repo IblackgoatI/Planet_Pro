@@ -39,6 +39,8 @@ UCLASS()
 class PLANET_PRO_API UMyGameInstance : public UAdvancedFriendsGameInstance
 {
     GENERATED_BODY()
+    
+    virtual void Init() override;
 
 public:
     // ==========================================================

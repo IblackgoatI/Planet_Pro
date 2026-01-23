@@ -1,8 +1,6 @@
-// MyGameInstance.cpp
-
 #include "MyGameInstance.h"
 #include "Json.h"
-#include "JsonUtilities.h" // JsonToInventory 등에서 필요
+#include "JsonUtilities.h"
 #include "JsonObjectConverter.h"
 
 // PlayFab 관련
@@ -12,7 +10,20 @@
 #include "PlayFabError.h"
 
 // ==========================================================
-// 1. 인벤토리 시스템 (기존 코드 유지)
+// ★ [핵심] 게임 시작 시 자동 로그인 로직
+// ==========================================================
+void UMyGameInstance::Init()
+{
+    Super::Init();
+
+    UE_LOG(LogTemp, Warning, TEXT("🚀 [MyGameInstance] Init: 자동 로그인을 시작합니다..."));
+    
+    // 즉시 로그인 및 데이터 로드 함수 호출
+    LoginAndLoadData();
+}
+
+// ==========================================================
+// 1. 인벤토리 시스템
 // ==========================================================
 void UMyGameInstance::AddOrUpdateItem(FName InItemID, int32 InAmount)
 {
@@ -35,7 +46,7 @@ FString UMyGameInstance::GetInventoryAsJsonString()
     for (const FItemData& Item : MyInventory)
     {
         TSharedPtr<FJsonObject> ItemObject = MakeShareable(new FJsonObject());
-        ItemObject->SetStringField("ID", Item.ItemID.ToString());
+        ItemObject->SetStringField("ID", Item.ItemID.ToString()); // 저장할 땐 "ID"로 통일 (호환성)
         ItemObject->SetNumberField("Amount", Item.Amount);
         ItemArray.Add(MakeShareable(new FJsonValueObject(ItemObject)));
     }
@@ -85,18 +96,12 @@ void UMyGameInstance::SaveInventoryToPlayFab_CPP()
 }
 
 // ==========================================================
-// 2. 시간 저장/로드 시스템 (기존 코드 유지)
+// 2. 시간 저장/로드 시스템
 // ==========================================================
-
 void UMyGameInstance::SaveSkyTime(float CurrentTime)
 {
     auto ClientAPI = IPlayFabModuleInterface::Get().GetClientAPI();
-    
-    if (!ClientAPI.IsValid()) 
-    {
-        UE_LOG(LogTemp, Error, TEXT("PlayFab ClientAPI is invalid!"));
-        return;
-    }
+    if (!ClientAPI.IsValid()) return;
 
     PlayFab::ClientModels::FUpdateUserDataRequest Request;
     FString TimeString = FString::SanitizeFloat(CurrentTime);
@@ -127,12 +132,7 @@ void UMyGameInstance::LoadSkyTime()
 void UMyGameInstance::OnSaveTimeSuccess(const PlayFab::ClientModels::FUpdateUserDataResult& Result)
 {
     if(GEngine) GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Green, TEXT("✅ [PlayFab] 시간 저장 성공!"));
-    UE_LOG(LogTemp, Log, TEXT("PlayFab Time Save Success!"));
-
-    if (OnSaveSuccess.IsBound())
-    {
-        OnSaveSuccess.Broadcast();
-    }
+    if (OnSaveSuccess.IsBound()) OnSaveSuccess.Broadcast();
 }
 
 void UMyGameInstance::OnLoadTimeSuccess(const PlayFab::ClientModels::FGetUserDataResult& Result)
@@ -141,18 +141,16 @@ void UMyGameInstance::OnLoadTimeSuccess(const PlayFab::ClientModels::FGetUserDat
     {
         FString TimeString = Result.Data[TEXT("SkyTime")].Value;
         SavedSkyTime = FCString::Atof(*TimeString);
+        
+        // 0.0 시간 방지 (하늘 멈춤 해결)
+        if (SavedSkyTime <= 0.001f) SavedSkyTime = 8.0f;
 
         UE_LOG(LogTemp, Warning, TEXT("📥 [PlayFab] 시간 로드 완료: %f"), SavedSkyTime);
-        if(GEngine) GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Cyan, FString::Printf(TEXT("📥 시간 로드됨: %f"), SavedSkyTime));
-
-        if (OnSkyTimeLoaded.IsBound())
-        {
-            OnSkyTimeLoaded.Broadcast(SavedSkyTime);
-        }
+        if (OnSkyTimeLoaded.IsBound()) OnSkyTimeLoaded.Broadcast(SavedSkyTime);
     }
     else
     {
-        UE_LOG(LogTemp, Warning, TEXT("⚠️ 저장된 시간이 없습니다. (첫 실행 or 초기화)"));
+        UE_LOG(LogTemp, Warning, TEXT("⚠️ 저장된 시간이 없습니다."));
         SavedSkyTime = -1.0f; 
     }
 }
@@ -160,12 +158,7 @@ void UMyGameInstance::OnLoadTimeSuccess(const PlayFab::ClientModels::FGetUserDat
 void UMyGameInstance::OnTimeError(const PlayFab::FPlayFabCppError& ErrorResult)
 {
     UE_LOG(LogTemp, Error, TEXT("❌ [PlayFab] Error: %s"), *ErrorResult.ErrorMessage);
-    if(GEngine) GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, FString::Printf(TEXT("❌ 실패: %s"), *ErrorResult.ErrorMessage));
 }
-
-void UMyGameInstance::OnUpdateUserDataSuccess(const PlayFab::ClientModels::FUpdateUserDataResult& Result) {}
-void UMyGameInstance::OnUpdateUserDataError(const PlayFab::FPlayFabCppError& ErrorResult) {}
-
 
 // ==========================================================
 // 3. [추가됨] 통합 저장 및 커스터마이징 구현부
@@ -196,7 +189,7 @@ void UMyGameInstance::OnLoginSuccess(const PlayFab::ClientModels::FLoginResult& 
 
     ClientAPI->GetUserData(Request,
         PlayFab::UPlayFabClientAPI::FGetUserDataDelegate::CreateUObject(this, &UMyGameInstance::OnLoadDataSuccess),
-        PlayFab::FPlayFabErrorDelegate::CreateUObject(this, &UMyGameInstance::OnLoginFailure) // 에러 처리는 재사용
+        PlayFab::FPlayFabErrorDelegate::CreateUObject(this, &UMyGameInstance::OnLoginFailure)
     );
 }
 
@@ -211,23 +204,27 @@ void UMyGameInstance::OnLoadDataSuccess(const PlayFab::ClientModels::FGetUserDat
     if (Result.Data.Contains(TEXT("Inventory")))
     {
         JsonToInventory(Result.Data[TEXT("Inventory")].Value);
+        UE_LOG(LogTemp, Warning, TEXT("   -> 인벤토리 로드됨 (%d개)"), MyInventory.Num());
     }
 
     // 2. 시간 로드
     if (Result.Data.Contains(TEXT("SkyTime")))
     {
         SavedSkyTime = FCString::Atof(*Result.Data[TEXT("SkyTime")].Value);
-        // 기존 델리게이트 호환 유지
+        if (SavedSkyTime <= 0.001f) SavedSkyTime = 8.0f; // 0.0 방지
         if (OnSkyTimeLoaded.IsBound()) OnSkyTimeLoaded.Broadcast(SavedSkyTime);
+        UE_LOG(LogTemp, Warning, TEXT("   -> 시간 로드됨: %f"), SavedSkyTime);
     }
 
     // 3. 커스터마이징 로드
     if (Result.Data.Contains(TEXT("CustomData")))
     {
         JsonToCustomData(Result.Data[TEXT("CustomData")].Value);
+        UE_LOG(LogTemp, Warning, TEXT("   -> 커스터마이징 로드됨 (Body:%d)"), MyCustomData.BodyIndex);
     }
 
-    UE_LOG(LogTemp, Warning, TEXT("📥 [PlayFab] 통합 데이터 로드 완료!"));
+    UE_LOG(LogTemp, Warning, TEXT("📥 [PlayFab] 통합 데이터 로드 최종 완료!"));
+    
     if (OnDataLoadSuccess.IsBound())
     {
         OnDataLoadSuccess.Broadcast();
@@ -256,7 +253,7 @@ void UMyGameInstance::SaveAllData()
     // 통합 전송
     ClientAPI->UpdateUserData(Request,
         PlayFab::UPlayFabClientAPI::FUpdateUserDataDelegate::CreateUObject(this, &UMyGameInstance::OnSaveDataSuccess),
-        PlayFab::FPlayFabErrorDelegate::CreateUObject(this, &UMyGameInstance::OnLoginFailure) // 에러 처리는 재사용
+        PlayFab::FPlayFabErrorDelegate::CreateUObject(this, &UMyGameInstance::OnLoginFailure)
     );
 }
 
@@ -301,7 +298,12 @@ void UMyGameInstance::JsonToInventory(const FString& JsonString)
             {
                 TSharedPtr<FJsonObject> ItemObj = Val->AsObject();
                 FItemData NewItem;
-                NewItem.ItemID = FName(*ItemObj->GetStringField(TEXT("ID")));
+                
+                // ★ [호환성] ID와 ItemID 둘 다 체크
+                if (ItemObj->HasField("ItemID")) NewItem.ItemID = FName(*ItemObj->GetStringField(TEXT("ItemID")));
+                else if (ItemObj->HasField("ID")) NewItem.ItemID = FName(*ItemObj->GetStringField(TEXT("ID")));
+                else NewItem.ItemID = FName("None");
+
                 NewItem.Amount = ItemObj->GetNumberField(TEXT("Amount"));
                 MyInventory.Add(NewItem);
             }
