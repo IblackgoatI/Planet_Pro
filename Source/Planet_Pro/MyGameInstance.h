@@ -43,6 +43,10 @@ class PLANET_PRO_API UMyGameInstance : public UAdvancedFriendsGameInstance
     virtual void Init() override;
 
 public:
+    
+    UPROPERTY(BlueprintReadOnly, Category = "PlayFab")
+    bool bIsDataLoaded = false;
+    
     // ==========================================================
     // 1. 인벤토리 시스템 (기존 유지)
     // ==========================================================

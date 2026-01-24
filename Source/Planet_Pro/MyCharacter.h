@@ -35,6 +35,10 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Components")
 	class USkeletalMeshComponent* Comp_SpaceShip_Skel; // 우주선 (Skeletal)
+	
+	// ★ [추가] 커마창 우주선 (Static) - BP_Customizing용
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Components")
+	class UStaticMeshComponent* Comp_SpaceShip_Static;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Components")
 	class UStaticMeshComponent* Comp_CharBody; // 캐릭터 몸통 (Static)

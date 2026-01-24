@@ -222,7 +222,9 @@ void UMyGameInstance::OnLoadDataSuccess(const PlayFab::ClientModels::FGetUserDat
         JsonToCustomData(Result.Data[TEXT("CustomData")].Value);
         UE_LOG(LogTemp, Warning, TEXT("   -> 커스터마이징 로드됨 (Body:%d)"), MyCustomData.BodyIndex);
     }
-
+    // ★★★ [제발 이 줄 추가] 이게 없어서 캐릭터가 데이터를 안 온 걸로 착각하는 겁니다! ★★★
+    bIsDataLoaded = true;
+    
     UE_LOG(LogTemp, Warning, TEXT("📥 [PlayFab] 통합 데이터 로드 최종 완료!"));
     
     if (OnDataLoadSuccess.IsBound())

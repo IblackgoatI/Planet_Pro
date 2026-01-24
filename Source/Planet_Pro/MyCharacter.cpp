@@ -5,6 +5,8 @@
 #include "JsonUtilities.h"
 #include "MyGameInstance.h" // GameInstance 헤더 필수
 #include "MainHUDWidget.h"
+#include "Components/StaticMeshComponent.h"
+#include "Components/SkeletalMeshComponent.h"
 
 // PlayFab 헤더
 #include "PlayFab.h"
@@ -23,48 +25,81 @@ void AMyCharacter::BeginPlay()
 {
     Super::BeginPlay();
 
-    // [1] 커스터마이징 컴포넌트 찾기 (이름 정확도 향상)
-    UE_LOG(LogTemp, Warning, TEXT("🛠️ [MyChar] 커스터마이징 컴포넌트 스캔 시작..."));
+    // 1. 현재 맵 이름 확인 (Lobby나 Game인지, Customizing인지)
+    FString CurrentMapName = GetWorld()->GetMapName();
+    bool bIsCustomizingMap = CurrentMapName.Contains(TEXT("Customizing"));
 
-    // 1. 스켈레탈 메시 (우주선) 찾기
-    TArray<USkeletalMeshComponent*> SkelComps;
-    GetComponents(SkelComps);
+    UE_LOG(LogTemp, Warning, TEXT("🛠️ [MyChar] 맵 확인: %s (커마모드: %d)"), *CurrentMapName, bIsCustomizingMap);
 
-    for (USkeletalMeshComponent* Comp : SkelComps)
-    {
-        FString CompName = Comp->GetName();
-        // "CharacterMesh0"(언리얼 기본)는 피하고, "test1"이나 "SpaceShip" 포함된 것만 찾음
-        if (!CompName.Equals(TEXT("CharacterMesh0")) && 
-           (CompName.Contains(TEXT("test1")) || CompName.Contains(TEXT("SpaceShip")) || CompName.Contains(TEXT("Mesh"))))
-        {
-            Comp_SpaceShip_Skel = Comp;
-            
-            int32 MatCount = Comp->GetNumMaterials();
-            // DMI 생성 (0: 겉면)
-            if(MatCount > 0) DMI_Ship_Shell = Comp_SpaceShip_Skel->CreateAndSetMaterialInstanceDynamic(0);
-            // DMI 생성 (4: 소파)
-            if(MatCount > 4) DMI_Ship_Sofa = Comp_SpaceShip_Skel->CreateAndSetMaterialInstanceDynamic(4);
-                
-            UE_LOG(LogTemp, Warning, TEXT("✅ [MyChar] 우주선(Skel) 확정: %s (슬롯:%d)"), *CompName, MatCount);
-            break; 
-        }
-    }
-
-    // 2. 스태틱 메시 (캐릭터) 찾기
+    // =========================================================
+    // [A] 컴포넌트 찾기 (스태틱/스켈레탈)
+    // =========================================================
     TArray<UStaticMeshComponent*> StaticComps;
     GetComponents(StaticComps);
 
     for (UStaticMeshComponent* Comp : StaticComps)
     {
-        if (Comp->GetName().Equals(TEXT("StaticMesh")))
+        FString CompName = Comp->GetName();
+
+        // 1. 캐릭터 몸통 (공통)
+        if (CompName.Equals(TEXT("Mesh_Char")) || (!bIsCustomizingMap && CompName.Equals(TEXT("StaticMesh"))))
         {
             Comp_CharBody = Comp;
-            if(Comp->GetNumMaterials() > 0)
-                DMI_Body = Comp_CharBody->CreateAndSetMaterialInstanceDynamic(0);
-
-            UE_LOG(LogTemp, Warning, TEXT("✅ [MyChar] 캐릭터(Body) 찾음: %s"), *Comp->GetName());
+            if(Comp->GetNumMaterials() > 0) 
+                DMI_Body = Comp->CreateAndSetMaterialInstanceDynamic(0);
+        }
+        // 2. 우주선 (커마창 전용 - StaticMesh)
+        else if (bIsCustomizingMap && CompName.Equals(TEXT("StaticMesh")))
+        {
+            Comp_SpaceShip_Static = Comp;
+            int32 MatCount = Comp->GetNumMaterials();
+            if (MatCount > 0) DMI_Ship_Shell = Comp->CreateAndSetMaterialInstanceDynamic(0);
+            if (MatCount > 4) DMI_Ship_Sofa = Comp->CreateAndSetMaterialInstanceDynamic(4);
         }
     }
+
+    // 인게임 전용 (Skeletal 우주선)
+    if (!bIsCustomizingMap)
+    {
+        TArray<USkeletalMeshComponent*> SkelComps;
+        GetComponents(SkelComps);
+        for (USkeletalMeshComponent* Comp : SkelComps)
+        {
+            FString CompName = Comp->GetName();
+            if (CompName.Contains(TEXT("test1")) || CompName.Contains(TEXT("SpaceShip")))
+            {
+                Comp_SpaceShip_Skel = Comp;
+                int32 MatCount = Comp->GetNumMaterials();
+                if(MatCount > 0) DMI_Ship_Shell = Comp->CreateAndSetMaterialInstanceDynamic(0);
+                if(MatCount > 4) DMI_Ship_Sofa = Comp->CreateAndSetMaterialInstanceDynamic(4);
+                break;
+            }
+        }
+    }
+
+    // =============================================================
+    // ★ [핵심 수정] 타이밍 문제 해결 (비동기 로딩 대기)
+    // =============================================================
+    UMyGameInstance* GI = Cast<UMyGameInstance>(GetGameInstance());
+    if (GI)
+    {
+        // 1. 만약 데이터가 이미 로드되어 있다면? -> 즉시 적용!
+        if (GI->bIsDataLoaded)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("⚡ [BeginPlay] 데이터가 이미 있습니다. 즉시 적용합니다!"));
+            ApplyCustomizationFromGI();
+        }
+        // 2. 데이터가 아직 안 왔다면? -> "다 되면 불러줘"라고 예약!
+        else
+        {
+            UE_LOG(LogTemp, Warning, TEXT("⏳ [BeginPlay] 데이터 로딩 중... 도착하면 적용하도록 예약합니다."));
+            
+            // 혹시 모를 중복 방지를 위해 제거 후 추가
+            GI->OnDataLoadSuccess.RemoveDynamic(this, &AMyCharacter::ApplyCustomizationFromGI);
+            GI->OnDataLoadSuccess.AddDynamic(this, &AMyCharacter::ApplyCustomizationFromGI);
+        }
+    }
+
 
     // 3. 저장된 커마 적용
     ApplyCustomizationFromGI();
@@ -419,31 +454,85 @@ void AMyCharacter::GetAxeCheat()
 // =================================================================
 // Customization (GameInstance -> Character)
 // =================================================================
+// =============================================================
+// ★ [수정] 보내주신 로그 강화 버전 (그대로 사용)
+// =============================================================
 void AMyCharacter::ApplyCustomizationFromGI()
 {
     UMyGameInstance* GI = Cast<UMyGameInstance>(GetGameInstance());
-    if (!GI) return;
+    if (!GI) 
+    {
+        UE_LOG(LogTemp, Error, TEXT("❌ [ApplyCustomization] GameInstance를 찾을 수 없습니다!"));
+        return;
+    }
 
-    // 1. 캐릭터 몸통
+    // [0] 데이터 준비 상태 확인 로그
+    if (!GI->bIsDataLoaded)
+    {
+        UE_LOG(LogTemp, Error, TEXT("⚠️ [ApplyCustomization] 주의: 데이터 로딩 완료 전 호출됨 (기본값 가능성 있음)"));
+    }
+
+    int32 BodyIdx = GI->MyCustomData.BodyIndex;
+    int32 EyeIdx = GI->MyCustomData.EyeIndex;
+    int32 MouthIdx = GI->MyCustomData.MouthIndex;
+    int32 ShipIdx = GI->MyCustomData.MachineIndex;
+
+    UE_LOG(LogTemp, Warning, TEXT("🔍 [ApplyCustomization] 적용 시도 -> Body: %d, Eye: %d, Mouth: %d, Ship: %d"), BodyIdx, EyeIdx, MouthIdx, ShipIdx);
+
+    // [1] 캐릭터 몸통 적용
     if (DMI_Body)
     {
-        if (GI->BodyTextureList.IsValidIndex(GI->MyCustomData.BodyIndex))
-            DMI_Body->SetTextureParameterValue("BodyTex", GI->BodyTextureList[GI->MyCustomData.BodyIndex]);
-        if (GI->EyeTextureList.IsValidIndex(GI->MyCustomData.EyeIndex))
-            DMI_Body->SetTextureParameterValue("EyeTex", GI->EyeTextureList[GI->MyCustomData.EyeIndex]);
-        if (GI->MouthTextureList.IsValidIndex(GI->MyCustomData.MouthIndex))
-            DMI_Body->SetTextureParameterValue("MouthTex", GI->MouthTextureList[GI->MyCustomData.MouthIndex]);
-    }
+        // 1. 몸통 텍스처
+        if (GI->BodyTextureList.IsValidIndex(BodyIdx))
+        {
+            UTexture2D* Tex = GI->BodyTextureList[BodyIdx];
+            if (Tex)
+            {
+                DMI_Body->SetTextureParameterValue(TEXT("BodyTex"), Tex);
+                UE_LOG(LogTemp, Log, TEXT("   ✅ [Body] BodyTex 적용 완료 (Index: %d)"), BodyIdx);
+            }
+            else UE_LOG(LogTemp, Error, TEXT("   ❌ [Body] 인덱스는 유효하지만 텍스처 파일이 비어있음(Null)! GI 확인 필요."));
+        }
+        else UE_LOG(LogTemp, Error, TEXT("   ❌ [Body] 인덱스 범위를 벗어남! (요청: %d, 전체개수: %d)"), BodyIdx, GI->BodyTextureList.Num());
 
-    // 2. 우주선
-    int32 ShipIdx = GI->MyCustomData.MachineIndex;
-    if (GI->ShipTextureList.IsValidIndex(ShipIdx))
+        // 2. 눈 텍스처
+        if (GI->EyeTextureList.IsValidIndex(EyeIdx))
+            DMI_Body->SetTextureParameterValue(TEXT("EyeTex"), GI->EyeTextureList[EyeIdx]);
+        
+        // 3. 입 텍스처
+        if (GI->MouthTextureList.IsValidIndex(MouthIdx))
+            DMI_Body->SetTextureParameterValue(TEXT("MouthTex"), GI->MouthTextureList[MouthIdx]);
+    }
+    else
     {
-        if (DMI_Ship_Shell) DMI_Ship_Shell->SetTextureParameterValue("ShipTex", GI->ShipTextureList[ShipIdx]);
+        UE_LOG(LogTemp, Error, TEXT("❌ [Body] DMI_Body가 없습니다! (BeginPlay에서 메시를 못 찾았거나 DMI 생성 실패)"));
     }
     
-    if (GI->SofaTextureList.IsValidIndex(ShipIdx))
+    // [2] 우주선 적용 (스태틱/스켈레탈 공통 DMI 사용)
+    if (DMI_Ship_Shell) 
     {
-        if (DMI_Ship_Sofa) DMI_Ship_Sofa->SetTextureParameterValue("SofaTex", GI->SofaTextureList[ShipIdx]);
+        if (GI->ShipTextureList.IsValidIndex(ShipIdx))
+        {
+            UTexture2D* ShipTex = GI->ShipTextureList[ShipIdx];
+            if (ShipTex)
+            {
+                DMI_Ship_Shell->SetTextureParameterValue(TEXT("ShipTex"), ShipTex);
+                UE_LOG(LogTemp, Log, TEXT("   ✅ [Ship] ShipTex 적용 완료 (Index: %d)"), ShipIdx);
+            }
+            else UE_LOG(LogTemp, Error, TEXT("   ❌ [Ship] 텍스처 파일이 비어있음(Null)! GI 확인 필요."));
+        }
+        else UE_LOG(LogTemp, Error, TEXT("   ❌ [Ship] 인덱스 범위를 벗어남! (요청: %d, 전체개수: %d)"), ShipIdx, GI->ShipTextureList.Num());
     }
+    else
+    {
+        UE_LOG(LogTemp, Error, TEXT("❌ [Ship] DMI_Ship_Shell이 없습니다! (BeginPlay에서 우주선 메시 이름 확인 요망)"));
+    }
+
+    // [3] 우주선 소파 적용
+    if (DMI_Ship_Sofa && GI->SofaTextureList.IsValidIndex(ShipIdx))
+    {
+        DMI_Ship_Sofa->SetTextureParameterValue(TEXT("SofaTex"), GI->SofaTextureList[ShipIdx]);
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("🏁 [ApplyCustomization] 함수 종료"));
 }

@@ -11,90 +11,69 @@ void APreviewCharacter::BeginPlay()
 {
     Super::BeginPlay();
 
-    UE_LOG(LogTemp, Warning, TEXT("🕵️‍♂️ [추적 시작] BeginPlay가 호출되었습니다!"));
+    UE_LOG(LogTemp, Warning, TEXT("🕵️‍♂️ [Preview] BeginPlay 시작!"));
 
-    // =================================================================
-    // 1. 스태틱 메시 찾기 (캐릭터 & 뚜껑)
-    // =================================================================
+    // 1. 컴포넌트 찾기 (이 부분은 잘 되므로 기존 유지)
     TArray<UStaticMeshComponent*> StaticComps;
     GetComponents(StaticComps);
 
     for (UStaticMeshComponent* Comp : StaticComps)
     {
         FString Name = Comp->GetName();
-        int32 MatCount = Comp->GetNumMaterials(); // 재질이 몇 칸인지 확인
+        int32 MatCount = Comp->GetNumMaterials();
 
-        UE_LOG(LogTemp, Warning, TEXT("🔎 검색된 스태틱 메시: %s (재질 슬롯 개수: %d)"), *Name, MatCount);
-
-        // 1) 캐릭터 (Bean) 찾기
         if (Name.Contains(TEXT("Mesh_Char")))
         {
             Target_CharBody = Comp;
-            
-            // ★ 로그: 0번 시도한다고 알림
-            UE_LOG(LogTemp, Warning, TEXT("👉 [시도] Mesh_Char의 0번 슬롯 DMI 생성 시도..."));
-            
-            if (MatCount > 0)
-            {
-                DMI_Body = Target_CharBody->CreateAndSetMaterialInstanceDynamic(0);
-                if(DMI_Body) UE_LOG(LogTemp, Warning, TEXT("✅ [성공] Mesh_Char DMI 생성 완료!"));
-            }
-            else
-            {
-                UE_LOG(LogTemp, Error, TEXT("❌ [실패] Mesh_Char에 머티리얼이 하나도 없습니다! 블루프린트에서 머티리얼을 꽂아주세요."));
-            }
+            if (MatCount > 0) DMI_Body = Target_CharBody->CreateAndSetMaterialInstanceDynamic(0);
         }
-        // 2) 우주선 뚜껑 (cu) 찾기
-        else if (Name.Equals(TEXT("StaticMesh")) || Name.Contains(TEXT("StaticMesh")))
+        else if (Name.Equals(TEXT("StaticMesh")) || Name.Contains(TEXT("StaticMesh"))) // "cu"가 들어있는 컴포넌트
         {
             Target_SpaceShip = Comp;
-            
-            // 0번 시도
-            if (MatCount > 0)
-            {
-                DMI_Shell = Target_SpaceShip->CreateAndSetMaterialInstanceDynamic(0);
-                UE_LOG(LogTemp, Warning, TEXT("✅ [성공] 뚜껑(StaticMesh) 0번 DMI 생성"));
-            }
-
-            // 4번 시도
-            if (MatCount > 4)
-            {
-                DMI_Sofa = Target_SpaceShip->CreateAndSetMaterialInstanceDynamic(4);
-                UE_LOG(LogTemp, Warning, TEXT("✅ [성공] 뚜껑(StaticMesh) 4번 DMI 생성"));
-            }
-            else
-            {
-                UE_LOG(LogTemp, Error, TEXT("⚠️ [주의] 뚜껑(StaticMesh)에 4번 슬롯이 없습니다! 현재 개수: %d개. (소파 색 변경 안됨)"), MatCount);
-            }
-        }
-    }
-
-    // =================================================================
-    // 2. 스켈레탈 메시 찾기 (다리/몸체)
-    // =================================================================
-    TArray<USkeletalMeshComponent*> SkeletalComps;
-    GetComponents(SkeletalComps);
-
-    for (USkeletalMeshComponent* Comp : SkeletalComps)
-    {
-        if (Comp->GetName().Contains(TEXT("Mesh_Machine")))
-        {
-            Target_Machine = Comp; // 변수 이름 복구됨
-            int32 SkelMatCount = Target_Machine->GetNumMaterials();
-
-            UE_LOG(LogTemp, Warning, TEXT("🔎 검색된 스켈레탈 메시: %s (재질 슬롯 개수: %d)"), *Comp->GetName(), SkelMatCount);
-
-            // 0번 시도
-            if (SkelMatCount > 0)
-            {
-                DMI_Machine = Target_Machine->CreateAndSetMaterialInstanceDynamic(0); // 변수 이름 복구됨
-                UE_LOG(LogTemp, Warning, TEXT("✅ [성공] 다리(Mesh_Machine) 0번 DMI 생성"));
-            }
-            break;
+            if (MatCount > 0) DMI_Shell = Target_SpaceShip->CreateAndSetMaterialInstanceDynamic(0); // M_BaseColor (0번)
+            if (MatCount > 4) DMI_Sofa = Target_SpaceShip->CreateAndSetMaterialInstanceDynamic(4);  // M_Sofa (4번)
         }
     }
     
-    UE_LOG(LogTemp, Warning, TEXT("🕵️‍♂️ [추적 종료] BeginPlay 끝"));
+    // ... 스켈레탈 메시 찾는 코드 생략 (기존 유지) ...
+    // 혹시 모르니 스켈레탈 메시 찾는 부분도 DMI_Machine 연결 잘 되어있는지 확인해주세요.
+
+    // =================================================================
+    // 2. 데이터 로딩 대기 로직 (수정됨)
+    // =================================================================
+    UMyGameInstance* GI = Cast<UMyGameInstance>(GetGameInstance());
+    if (GI)
+    {
+        // 1. 이미 데이터가 있으면 -> 바로 적용
+        if (GI->bIsDataLoaded)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("⚡ [Preview] 데이터 이미 있음! (Body:%d, Ship:%d) 즉시 적용."), 
+                GI->MyCustomData.BodyIndex, GI->MyCustomData.MachineIndex);
+            OnGILoadComplete(); 
+        }
+        // 2. 데이터가 없으면 -> 예약
+        else
+        {
+            UE_LOG(LogTemp, Warning, TEXT("⏳ [Preview] 데이터 로딩 중... 예약 걸기!"));
+            
+            GI->OnDataLoadSuccess.RemoveDynamic(this, &APreviewCharacter::OnGILoadComplete);
+            // ★ 헤더에 UFUNCTION() 없으면 여기서 터지거나 무시됨
+            GI->OnDataLoadSuccess.AddDynamic(this, &APreviewCharacter::OnGILoadComplete);
+        }
+    }
+}
+
+void APreviewCharacter::OnGILoadComplete()
+{
+    UMyGameInstance* GI = Cast<UMyGameInstance>(GetGameInstance());
+    if (!GI) return;
+
+    UE_LOG(LogTemp, Warning, TEXT("📬 [Preview] 데이터 도착! 적용 시작. (Body:%d, Ship:%d)"), 
+        GI->MyCustomData.BodyIndex, GI->MyCustomData.MachineIndex);
+
+    // ★ 여기서 실제로 옷을 입힙니다.
+    UpdateParts(GI->MyCustomData.BodyIndex, GI->MyCustomData.EyeIndex, GI->MyCustomData.MouthIndex);
+    UpdateMachine(GI->MyCustomData.MachineIndex);
 }
 
 void APreviewCharacter::UpdateParts(int32 BodyIdx, int32 EyeIdx, int32 MouthIdx)
