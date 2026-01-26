@@ -26,7 +26,11 @@ protected:
 
 public:	
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
-
+	
+	// "지금 들고 있는 아이템이 도끼인지?
+	UFUNCTION(BlueprintPure, Category = "Interaction")
+	bool IsAxeEquipped();
+	
 	// ==========================================================
 	// 1. 컴포넌트 & 리소스 (커스터마이징용 변수 선언)
 	// ==========================================================

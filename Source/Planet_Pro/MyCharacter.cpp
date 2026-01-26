@@ -536,3 +536,18 @@ void AMyCharacter::ApplyCustomizationFromGI()
     
     UE_LOG(LogTemp, Warning, TEXT("🏁 [ApplyCustomization] 함수 종료"));
 }
+
+bool AMyCharacter::IsAxeEquipped()
+{
+    // 1. 현재 선택된 슬롯이 유효한지 확인
+    if (Inventory.IsValidIndex(CurrentSelectedSlotIndex))
+    {
+        // 2. 해당 슬롯의 아이템 ID가 "Axe"인지 확인
+        if (Inventory[CurrentSelectedSlotIndex].ItemID == FName("Axe"))
+        {
+            return true; // 도끼 맞음!
+        }
+    }
+
+    return false; // 도끼 아님 (빈손이거나 다른 아이템)
+}
