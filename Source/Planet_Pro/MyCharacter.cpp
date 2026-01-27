@@ -551,3 +551,57 @@ bool AMyCharacter::IsAxeEquipped()
 
     return false; // 도끼 아님 (빈손이거나 다른 아이템)
 }
+
+bool AMyCharacter::ConsumeInventoryItem(FName TargetItemID, int32 AmountToConsume)
+{
+    // 1. 인벤토리 순회하며 아이템 찾기
+    for (int32 i = 0; i < Inventory.Num(); i++)
+    {
+        // 아이템 ID가 일치하고, 개수가 충분한지 확인
+        if (Inventory[i].ItemID == TargetItemID && Inventory[i].Amount >= AmountToConsume)
+        {
+            // 2. 개수 차감
+            Inventory[i].Amount -= AmountToConsume;
+
+            // 3. 개수가 0이 되면 아이템 슬롯 비우기 (None 처리)
+            if (Inventory[i].Amount <= 0)
+            {
+                Inventory[i].ItemID = FName("None");
+                Inventory[i].Amount = 0;
+            }
+
+            // 4. 변경 사항 반영 (UI 갱신 + PlayFab 저장)
+            if (MainHUDInstance) 
+            {
+                MainHUDInstance->RefreshInventory(Inventory);
+            }
+            
+            // 무기 슬롯이었다면 비주얼 업데이트
+            if (i == CurrentSelectedSlotIndex) 
+            {
+                UpdateWeaponVisuals();
+            }
+
+            // ★ PlayFab에 저장 (서버 동기화)
+           //SaveInventoryToPlayFab();
+            // ★ 스마트 저장 요청 (3초 뒤 저장)
+            RequestSmartSave(); 
+            UE_LOG(LogTemp, Warning, TEXT("✅ [ConsumeItem] %s 아이템 %d개 소모 성공!"), *TargetItemID.ToString(), AmountToConsume);
+            return true; // 성공!
+        }
+    }
+
+    UE_LOG(LogTemp, Warning, TEXT("❌ [ConsumeItem] %s 아이템이 부족하거나 없습니다."), *TargetItemID.ToString());
+    return false; // 실패 (아이템 없음)
+}
+
+void AMyCharacter::RequestSmartSave()
+{
+    // 이미 타이머가 돌고 있다면 취소하고 다시 설정 (시간 연장)
+    GetWorld()->GetTimerManager().ClearTimer(SaveTimerHandle);
+
+    // 3초 뒤에 SaveInventoryToPlayFab 함수를 실행해라!
+    GetWorld()->GetTimerManager().SetTimer(SaveTimerHandle, this, &AMyCharacter::SaveInventoryToPlayFab, 3.0f, false);
+
+    UE_LOG(LogTemp, Log, TEXT("⏳ [SmartSave] 3초 뒤 저장 예약됨... (연타하면 시간 연장)"));
+}

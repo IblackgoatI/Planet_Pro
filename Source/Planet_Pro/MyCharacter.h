@@ -23,9 +23,18 @@ public:
 
 protected:
 	virtual void BeginPlay() override;
+	// [추가] 저장을 지연시키기 위한 타이머
+	FTimerHandle SaveTimerHandle;
 
 public:	
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
+	
+	// [추가] 인벤토리에서 아이템 소모 (성공 시 true 반환)
+	UFUNCTION(BlueprintCallable, Category = "Inventory")
+	bool ConsumeInventoryItem(FName TargetItemID, int32 AmountToConsume);
+	
+	// [추가] 즉시 저장하지 않고, 3초 뒤에 몰아서 저장하는 함수
+	void RequestSmartSave();
 	
 	// "지금 들고 있는 아이템이 도끼인지?
 	UFUNCTION(BlueprintPure, Category = "Interaction")
