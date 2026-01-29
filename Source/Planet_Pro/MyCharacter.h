@@ -29,6 +29,8 @@ class PLANET_PRO_API AMyCharacter : public ACharacter
 
 public:
 	AMyCharacter();
+	// ★ [추가 1] 레플리케이션 필수 함수 (이거 없으면 에러남)
+	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 protected:
 	virtual void BeginPlay() override;
@@ -36,11 +38,20 @@ protected:
 	FTimerHandle SaveTimerHandle;
 
 public:	
+	
+	UFUNCTION(Server, Reliable)
+	void Server_EquipItem(FName ItemID);
+	
 	UFUNCTION(BlueprintImplementableEvent, Category = "Visuals")
 	void BP_UpdateEquippedItem(ECharacterWeaponState NewState);
 	
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
+	// ★ [수정 2] 기존 UPROPERTY를 이렇게 고치세요!
+	// (ReplicatedUsing = 함수이름) -> 변수 바뀌면 저 함수 자동 실행해라!
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, ReplicatedUsing = OnRep_CurrentWeaponState, Category = "Animation")
 	ECharacterWeaponState CurrentWeaponState;
+	
+	UFUNCTION()
+	void OnRep_CurrentWeaponState();
 	
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
 	

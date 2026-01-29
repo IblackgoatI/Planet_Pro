@@ -12,10 +12,12 @@
 #include "PlayFab.h"
 #include "Core/PlayFabClientDataModels.h"
 #include "Core/PlayFabClientAPI.h"
+#include "Net/UnrealNetwork.h"
 
 AMyCharacter::AMyCharacter()
 {
     PrimaryActorTick.bCanEverTick = true;
+    bReplicates = true;
 }
 
 // =================================================================
@@ -393,14 +395,27 @@ void AMyCharacter::OnSaveError(const PlayFab::FPlayFabCppError& Error)
 // =================================================================
 void AMyCharacter::SelectQuickSlot(int32 Slot)
 {
+    // 1. 내 UI 갱신 (이건 나만 보면 되니까 그냥 실행)
     CurrentSelectedSlotIndex = Slot;
     if (MainHUDInstance)
+    {
         MainHUDInstance->UpdateQuickSlotHighlight(Slot);
-    UpdateWeaponVisuals();
+    }
+
+    // 2. 인벤토리에 아이템이 있는지 확인
+    FName TargetItemID = FName("None");
+    if (Inventory.IsValidIndex(Slot))
+    {
+        TargetItemID = Inventory[Slot].ItemID;
+    }
+
+    // ★ [핵심] 서버한테 "나 이거 낄래!" 하고 요청 보내기
+    Server_EquipItem(TargetItemID);
 }
 
 void AMyCharacter::UpdateWeaponVisuals()
 {
+    if (GetLocalRole() < ROLE_Authority) return;
     // 1. 현재 선택된 아이템 확인
     if (!Inventory.IsValidIndex(CurrentSelectedSlotIndex)) return;
 
@@ -424,12 +439,30 @@ void AMyCharacter::UpdateWeaponVisuals()
 
     // 3. 상태 변수 업데이트 (애니메이션 BP가 이걸 보고 동작을 바꿈)
     CurrentWeaponState = NewState;
-
+    
+    OnRep_CurrentWeaponState();
+    
     // ★ 4. 블루프린트한테 명령 내리기! (여기서 시각적 처리를 넘깁니다)
     BP_UpdateEquippedItem(NewState); 
     
     // 로그 확인
     UE_LOG(LogTemp, Warning, TEXT("명령 전달함: 상태 %d"), (int32)NewState);
+}
+
+// 1. 동기화 목록에 변수 등록
+void AMyCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+    Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+
+    // "CurrentWeaponState 변수는 모든 사람에게 동기화해라!"
+    DOREPLIFETIME(AMyCharacter, CurrentWeaponState);
+}
+
+// 2. 클라이언트가 변수 변경을 감지했을 때 실행되는 함수
+void AMyCharacter::OnRep_CurrentWeaponState()
+{
+    // "변수가 바뀌었으니 블루프린트야, 메시 업데이트 해라!"
+    BP_UpdateEquippedItem(CurrentWeaponState);
 }
 
 void AMyCharacter::OnQuickSlot1(){ SelectQuickSlot(0); }
@@ -622,4 +655,32 @@ void AMyCharacter::RequestSmartSave()
     GetWorld()->GetTimerManager().SetTimer(SaveTimerHandle, this, &AMyCharacter::SaveInventoryToPlayFab, 3.0f, false);
 
     UE_LOG(LogTemp, Log, TEXT("⏳ [SmartSave] 3초 뒤 저장 예약됨... (연타하면 시간 연장)"));
+}
+
+void AMyCharacter::Server_EquipItem_Implementation(FName ItemID)
+{
+    // 1. 받은 아이템 이름으로 상태 결정
+    ECharacterWeaponState NewState = ECharacterWeaponState::Unarmed;
+
+    if (ItemID == FName("Axe"))
+    {
+        NewState = ECharacterWeaponState::Axe;
+    }
+    else if (ItemID == FName("Wood"))
+    {
+        NewState = ECharacterWeaponState::Wood;
+    }
+    else if (ItemID == FName("Berry") || ItemID == FName("Berry_D"))
+    {
+        NewState = ECharacterWeaponState::Berry;
+    }
+
+    // 2. 서버에서 상태 변수 변경 (이러면 Replicated 돼서 다같이 보임)
+    CurrentWeaponState = NewState;
+
+    // 3. 서버 자신도 메시 갱신 (서버 화면용)
+    OnRep_CurrentWeaponState();
+    
+    // 로그 확인
+    UE_LOG(LogTemp, Warning, TEXT("📡 [Server] 클라이언트 요청 처리함: %s -> 상태 %d"), *ItemID.ToString(), (int32)NewState);
 }
