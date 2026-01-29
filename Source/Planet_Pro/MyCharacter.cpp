@@ -401,17 +401,35 @@ void AMyCharacter::SelectQuickSlot(int32 Slot)
 
 void AMyCharacter::UpdateWeaponVisuals()
 {
-    if (!WeaponMeshComp) return;
+    // 1. 현재 선택된 아이템 확인
+    if (!Inventory.IsValidIndex(CurrentSelectedSlotIndex)) return;
 
-    if (Inventory.IsValidIndex(CurrentSelectedSlotIndex) &&
-        Inventory[CurrentSelectedSlotIndex].ItemID == FName("Axe"))
+    FName CurrentItemID = Inventory[CurrentSelectedSlotIndex].ItemID;
+    
+    // 2. 상태 결정 (Enum 값 정하기)
+    ECharacterWeaponState NewState = ECharacterWeaponState::Unarmed;
+
+    if (CurrentItemID == FName("Axe"))
     {
-        WeaponMeshComp->SetVisibility(true);
+        NewState = ECharacterWeaponState::Axe;
     }
-    else
+    else if (CurrentItemID == FName("Wood"))
     {
-        WeaponMeshComp->SetVisibility(false);
+        NewState = ECharacterWeaponState::Wood;
     }
+    else if (CurrentItemID == FName("Berry") || CurrentItemID == FName("Berry_D"))
+    {
+        NewState = ECharacterWeaponState::Berry;
+    }
+
+    // 3. 상태 변수 업데이트 (애니메이션 BP가 이걸 보고 동작을 바꿈)
+    CurrentWeaponState = NewState;
+
+    // ★ 4. 블루프린트한테 명령 내리기! (여기서 시각적 처리를 넘깁니다)
+    BP_UpdateEquippedItem(NewState); 
+    
+    // 로그 확인
+    UE_LOG(LogTemp, Warning, TEXT("명령 전달함: 상태 %d"), (int32)NewState);
 }
 
 void AMyCharacter::OnQuickSlot1(){ SelectQuickSlot(0); }

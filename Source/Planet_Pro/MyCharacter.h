@@ -13,6 +13,15 @@
 
 #include "MyCharacter.generated.h"
 
+UENUM(BlueprintType)
+enum class ECharacterWeaponState : uint8
+{
+	Unarmed     UMETA(DisplayName = "빈손"),
+	Axe         UMETA(DisplayName = "도끼 들음"),
+	Wood        UMETA(DisplayName = "통나무 들음"),
+	Berry       UMETA(DisplayName = "열매 들음")
+};
+
 UCLASS()
 class PLANET_PRO_API AMyCharacter : public ACharacter
 {
@@ -27,6 +36,12 @@ protected:
 	FTimerHandle SaveTimerHandle;
 
 public:	
+	UFUNCTION(BlueprintImplementableEvent, Category = "Visuals")
+	void BP_UpdateEquippedItem(ECharacterWeaponState NewState);
+	
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
+	ECharacterWeaponState CurrentWeaponState;
+	
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
 	
 	// [추가] 인벤토리에서 아이템 소모 (성공 시 true 반환)
