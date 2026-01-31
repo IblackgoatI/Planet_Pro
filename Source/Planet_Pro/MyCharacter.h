@@ -19,7 +19,8 @@ enum class ECharacterWeaponState : uint8
 	Unarmed     UMETA(DisplayName = "빈손"),
 	Axe         UMETA(DisplayName = "도끼 들음"),
 	Wood        UMETA(DisplayName = "통나무 들음"),
-	Berry       UMETA(DisplayName = "열매 들음")
+	Berry       UMETA(DisplayName = "열매 들음"),
+	Syringe     UMETA(DisplayName = "주사기 들음")
 };
 
 UCLASS()
@@ -148,4 +149,20 @@ public:
 	void OnQuickSlot6();
 	void OnQuickSlot7();
 	void OnQuickSlot8();
+	
+	// [추가] 아이템 교환 함수 (재료 이름, 재료 개수, 보상 이름, 보상 개수)
+	UFUNCTION(BlueprintCallable, Category = "Store")
+	bool TryExchangeItem(FName CostItemID, int32 CostAmount, FName RewardItemID, int32 RewardAmount);
+	
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Components")
+	class USkeletalMeshComponent* Comp_EquippedSyringe;
+	
+	UFUNCTION(BlueprintCallable, Category = "Store")
+	bool BuyAxe(); // 베리 10개 -> 도끼
+
+	UFUNCTION(BlueprintCallable, Category = "Store")
+	bool BuySyringe(); // 나무 15개 + 베리 10개 -> 주사기
+    
+	// 재료 확인용 헬퍼 함수
+	bool HasItem(FName ItemID, int32 Amount);
 };

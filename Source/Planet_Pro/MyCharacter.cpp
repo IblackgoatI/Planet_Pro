@@ -74,7 +74,12 @@ void AMyCharacter::BeginPlay()
                 int32 MatCount = Comp->GetNumMaterials();
                 if(MatCount > 0) DMI_Ship_Shell = Comp->CreateAndSetMaterialInstanceDynamic(0);
                 if(MatCount > 4) DMI_Ship_Sofa = Comp->CreateAndSetMaterialInstanceDynamic(4);
-                break;
+            }
+            if (CompName.Equals(TEXT("Cylinder001")))
+            {
+                Comp_EquippedSyringe = Comp;
+                Comp_EquippedSyringe->SetVisibility(false); // 평소엔 숨김
+                UE_LOG(LogTemp, Warning, TEXT("✅ 주사기(SyringeMesh) 연결 완료!"));
             }
         }
     }
@@ -424,18 +429,10 @@ void AMyCharacter::UpdateWeaponVisuals()
     // 2. 상태 결정 (Enum 값 정하기)
     ECharacterWeaponState NewState = ECharacterWeaponState::Unarmed;
 
-    if (CurrentItemID == FName("Axe"))
-    {
-        NewState = ECharacterWeaponState::Axe;
-    }
-    else if (CurrentItemID == FName("Wood"))
-    {
-        NewState = ECharacterWeaponState::Wood;
-    }
-    else if (CurrentItemID == FName("Berry") || CurrentItemID == FName("Berry_D"))
-    {
-        NewState = ECharacterWeaponState::Berry;
-    }
+    if (CurrentItemID == FName("Axe"))          NewState = ECharacterWeaponState::Axe;
+    else if (CurrentItemID == FName("Wood"))    NewState = ECharacterWeaponState::Wood;
+    else if (CurrentItemID == FName("Berry_D"))   NewState = ECharacterWeaponState::Berry;
+    else if (CurrentItemID == FName("Syringe")) NewState = ECharacterWeaponState::Syringe; 
 
     // 3. 상태 변수 업데이트 (애니메이션 BP가 이걸 보고 동작을 바꿈)
     CurrentWeaponState = NewState;
@@ -662,18 +659,10 @@ void AMyCharacter::Server_EquipItem_Implementation(FName ItemID)
     // 1. 받은 아이템 이름으로 상태 결정
     ECharacterWeaponState NewState = ECharacterWeaponState::Unarmed;
 
-    if (ItemID == FName("Axe"))
-    {
-        NewState = ECharacterWeaponState::Axe;
-    }
-    else if (ItemID == FName("Wood"))
-    {
-        NewState = ECharacterWeaponState::Wood;
-    }
-    else if (ItemID == FName("Berry") || ItemID == FName("Berry_D"))
-    {
-        NewState = ECharacterWeaponState::Berry;
-    }
+    if (ItemID == FName("Axe"))          NewState = ECharacterWeaponState::Axe;
+    else if (ItemID == FName("Wood"))    NewState = ECharacterWeaponState::Wood;
+    else if (ItemID == FName("Berry_D"))   NewState = ECharacterWeaponState::Berry;
+    else if (ItemID == FName("Syringe")) NewState = ECharacterWeaponState::Syringe;
 
     // 2. 서버에서 상태 변수 변경 (이러면 Replicated 돼서 다같이 보임)
     CurrentWeaponState = NewState;
@@ -683,4 +672,78 @@ void AMyCharacter::Server_EquipItem_Implementation(FName ItemID)
     
     // 로그 확인
     UE_LOG(LogTemp, Warning, TEXT("📡 [Server] 클라이언트 요청 처리함: %s -> 상태 %d"), *ItemID.ToString(), (int32)NewState);
+}
+
+bool AMyCharacter::TryExchangeItem(FName CostItemID, int32 CostAmount, FName RewardItemID, int32 RewardAmount)
+{
+    // 1. 재료 소모 시도 (이미 만들어두신 함수 활용!)
+    // ConsumeInventoryItem 안에서 개수 확인, 차감, 저장까지 다 처리해줍니다.
+    bool bConsumed = ConsumeInventoryItem(CostItemID, CostAmount);
+
+    if (bConsumed)
+    {
+        // 2. 소모 성공 시 -> 보상 아이템 지급
+        AddInventoryItem(RewardItemID, RewardAmount);
+        
+        UE_LOG(LogTemp, Warning, TEXT("💰 [Store] 교환 성공! %s(%d) 소모 -> %s(%d) 획득"), 
+            *CostItemID.ToString(), CostAmount, *RewardItemID.ToString(), RewardAmount);
+        
+        return true; // 교환 성공
+    }
+    else
+    {
+        // 3. 소모 실패 (재료 부족)
+        UE_LOG(LogTemp, Warning, TEXT("❌ [Store] 교환 실패: 재료(%s)가 부족합니다."), *CostItemID.ToString());
+        return false; // 교환 실패
+    }
+}
+
+// [헬퍼] 아이템 있는지 확인만 하는 함수 (소모 안 함)
+bool AMyCharacter::HasItem(FName ItemID, int32 Amount)
+{
+    for (const auto& Item : Inventory)
+    {
+        if (Item.ItemID == ItemID && Item.Amount >= Amount)
+            return true;
+    }
+    return false;
+}
+
+// [구매 1] 도끼 구매 (베리 10개 -> 도끼 1개)
+bool AMyCharacter::BuyAxe()
+{
+    // 1. 베리 10개 소모 시도
+    if (ConsumeInventoryItem(FName("Berry_D"), 10))
+    {
+        // 2. 성공 시 도끼 지급
+        AddInventoryItem(FName("Axe"), 1);
+        UE_LOG(LogTemp, Warning, TEXT("💰 도끼 구매 성공! (베리 10 소모)"));
+        return true;
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("❌ 도끼 구매 실패: 베리가 부족합니다."));
+    return false;
+}
+
+// [구매 2] 주사기 구매 (나무 15개 + 베리 10개 -> 주사기 1개)
+bool AMyCharacter::BuySyringe()
+{
+    // 1. 재료가 둘 다 있는지 먼저 확인 (검사)
+    bool bHasWood = HasItem(FName("Wood"), 15);
+    bool bHasBerry = HasItem(FName("Berry_D"), 10);
+
+    if (bHasWood && bHasBerry)
+    {
+        // 2. 둘 다 있으면 실제로 소모
+        ConsumeInventoryItem(FName("Wood"), 15);
+        ConsumeInventoryItem(FName("Berry_D"), 10);
+
+        // 3. 주사기 지급
+        AddInventoryItem(FName("Syringe"), 1);
+        UE_LOG(LogTemp, Warning, TEXT("💉 주사기 구매 성공! (나무 15 + 베리 10 소모)"));
+        return true;
+    }
+
+    UE_LOG(LogTemp, Warning, TEXT("❌ 주사기 구매 실패: 재료가 부족합니다."));
+    return false;
 }
