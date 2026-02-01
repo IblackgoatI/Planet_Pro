@@ -169,6 +169,7 @@ void AMyCharacter::BeginPlay()
                 })
         );
     }
+    OnRep_CustomData();
 }
 
 // =================================================================
@@ -453,6 +454,8 @@ void AMyCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLife
 
     // "CurrentWeaponState 변수는 모든 사람에게 동기화해라!"
     DOREPLIFETIME(AMyCharacter, CurrentWeaponState);
+    
+    DOREPLIFETIME(AMyCharacter, RepCustomData);
 }
 
 // 2. 클라이언트가 변수 변경을 감지했을 때 실행되는 함수
@@ -507,82 +510,91 @@ void AMyCharacter::GetAxeCheat()
 // =============================================================
 void AMyCharacter::ApplyCustomizationFromGI()
 {
+    // 1. 내 컴퓨터인지 확인 (내 캐릭터만 GI에서 정보를 가져와야 함)
+    if (!IsLocallyControlled()) return;
+
     UMyGameInstance* GI = Cast<UMyGameInstance>(GetGameInstance());
-    if (!GI) 
+    if (!GI || !GI->bIsDataLoaded) return;
+
+    // 2. GI 데이터를 구조체에 포장
+    FRepCustomData NewData;
+    NewData.BodyIndex = GI->MyCustomData.BodyIndex;
+    NewData.EyeIndex = GI->MyCustomData.EyeIndex;
+    NewData.MouthIndex = GI->MyCustomData.MouthIndex;
+    NewData.ShipIndex = GI->MyCustomData.MachineIndex;
+
+    // 3. 서버에게 전송! (나 이렇게 꾸몄어!)
+    Server_ApplyCustomData(NewData);
+    
+    UE_LOG(LogTemp, Warning, TEXT("📤 [Client] 서버로 커마 정보 전송함!"));
+}
+
+void AMyCharacter::Server_ApplyCustomData_Implementation(FRepCustomData NewData)
+{
+    // 서버 변수 저장 (이제 모든 클라한테 자동 전파됨)
+    RepCustomData = NewData;
+
+    // ★ 서버는 OnRep이 자동 실행 안 되므로 수동 실행 (호스트 화면 갱신용)
+    OnRep_CustomData();
+}
+
+// 2. 실제 외형 변경 (서버 & 클라 모두 실행됨)
+void AMyCharacter::OnRep_CustomData()
+{
+    // 1. DMI가 없으면 다시 찾아서 만들기 (안전장치)
+    if (!DMI_Body && Comp_CharBody)
     {
-        UE_LOG(LogTemp, Error, TEXT("❌ [ApplyCustomization] GameInstance를 찾을 수 없습니다!"));
-        return;
+        if(Comp_CharBody->GetNumMaterials() > 0)
+            DMI_Body = Comp_CharBody->CreateAndSetMaterialInstanceDynamic(0);
     }
-
-    // [0] 데이터 준비 상태 확인 로그
-    if (!GI->bIsDataLoaded)
+    
+    // 우주선 DMI도 없으면 생성 시도
+    if (!DMI_Ship_Shell && Comp_SpaceShip_Static) // 혹은 Skel
     {
-        UE_LOG(LogTemp, Error, TEXT("⚠️ [ApplyCustomization] 주의: 데이터 로딩 완료 전 호출됨 (기본값 가능성 있음)"));
+        if(Comp_SpaceShip_Static->GetNumMaterials() > 0)
+            DMI_Ship_Shell = Comp_SpaceShip_Static->CreateAndSetMaterialInstanceDynamic(0);
     }
+    
+    // 1. GI가 아니라, 공유받은 변수(RepCustomData)를 사용!
+    int32 BodyIdx = RepCustomData.BodyIndex;
+    int32 EyeIdx = RepCustomData.EyeIndex;
+    int32 MouthIdx = RepCustomData.MouthIndex;
+    int32 ShipIdx = RepCustomData.ShipIndex;
 
-    int32 BodyIdx = GI->MyCustomData.BodyIndex;
-    int32 EyeIdx = GI->MyCustomData.EyeIndex;
-    int32 MouthIdx = GI->MyCustomData.MouthIndex;
-    int32 ShipIdx = GI->MyCustomData.MachineIndex;
+    // 텍스처 리스트를 가져오기 위해 GI 접근 (리소스는 로컬에 있으니까)
+    UMyGameInstance* GI = Cast<UMyGameInstance>(GetGameInstance());
+    if (!GI) return;
 
-    UE_LOG(LogTemp, Warning, TEXT("🔍 [ApplyCustomization] 적용 시도 -> Body: %d, Eye: %d, Mouth: %d, Ship: %d"), BodyIdx, EyeIdx, MouthIdx, ShipIdx);
+    UE_LOG(LogTemp, Warning, TEXT("🎨 [OnRep] 커마 적용 시작: Body(%d), Ship(%d)"), BodyIdx, ShipIdx);
 
-    // [1] 캐릭터 몸통 적용
+    // =========================================================
+    // [기존 코드 재활용] - 변수만 GI->... 에서 지역변수(BodyIdx)로 변경
+    // =========================================================
+    
+    // [1] 몸통 적용
     if (DMI_Body)
     {
-        // 1. 몸통 텍스처
         if (GI->BodyTextureList.IsValidIndex(BodyIdx))
-        {
-            UTexture2D* Tex = GI->BodyTextureList[BodyIdx];
-            if (Tex)
-            {
-                DMI_Body->SetTextureParameterValue(TEXT("BodyTex"), Tex);
-                UE_LOG(LogTemp, Log, TEXT("   ✅ [Body] BodyTex 적용 완료 (Index: %d)"), BodyIdx);
-            }
-            else UE_LOG(LogTemp, Error, TEXT("   ❌ [Body] 인덱스는 유효하지만 텍스처 파일이 비어있음(Null)! GI 확인 필요."));
-        }
-        else UE_LOG(LogTemp, Error, TEXT("   ❌ [Body] 인덱스 범위를 벗어남! (요청: %d, 전체개수: %d)"), BodyIdx, GI->BodyTextureList.Num());
-
-        // 2. 눈 텍스처
+            DMI_Body->SetTextureParameterValue(TEXT("BodyTex"), GI->BodyTextureList[BodyIdx]);
+        
         if (GI->EyeTextureList.IsValidIndex(EyeIdx))
             DMI_Body->SetTextureParameterValue(TEXT("EyeTex"), GI->EyeTextureList[EyeIdx]);
-        
-        // 3. 입 텍스처
+
         if (GI->MouthTextureList.IsValidIndex(MouthIdx))
             DMI_Body->SetTextureParameterValue(TEXT("MouthTex"), GI->MouthTextureList[MouthIdx]);
     }
-    else
+
+    // [2] 우주선 적용 (ShipIdx 사용)
+    if (DMI_Ship_Shell && GI->ShipTextureList.IsValidIndex(ShipIdx))
     {
-        UE_LOG(LogTemp, Error, TEXT("❌ [Body] DMI_Body가 없습니다! (BeginPlay에서 메시를 못 찾았거나 DMI 생성 실패)"));
-    }
-    
-    // [2] 우주선 적용 (스태틱/스켈레탈 공통 DMI 사용)
-    if (DMI_Ship_Shell) 
-    {
-        if (GI->ShipTextureList.IsValidIndex(ShipIdx))
-        {
-            UTexture2D* ShipTex = GI->ShipTextureList[ShipIdx];
-            if (ShipTex)
-            {
-                DMI_Ship_Shell->SetTextureParameterValue(TEXT("ShipTex"), ShipTex);
-                UE_LOG(LogTemp, Log, TEXT("   ✅ [Ship] ShipTex 적용 완료 (Index: %d)"), ShipIdx);
-            }
-            else UE_LOG(LogTemp, Error, TEXT("   ❌ [Ship] 텍스처 파일이 비어있음(Null)! GI 확인 필요."));
-        }
-        else UE_LOG(LogTemp, Error, TEXT("   ❌ [Ship] 인덱스 범위를 벗어남! (요청: %d, 전체개수: %d)"), ShipIdx, GI->ShipTextureList.Num());
-    }
-    else
-    {
-        UE_LOG(LogTemp, Error, TEXT("❌ [Ship] DMI_Ship_Shell이 없습니다! (BeginPlay에서 우주선 메시 이름 확인 요망)"));
+        DMI_Ship_Shell->SetTextureParameterValue(TEXT("ShipTex"), GI->ShipTextureList[ShipIdx]);
     }
 
-    // [3] 우주선 소파 적용
+    // [3] 소파 적용
     if (DMI_Ship_Sofa && GI->SofaTextureList.IsValidIndex(ShipIdx))
     {
         DMI_Ship_Sofa->SetTextureParameterValue(TEXT("SofaTex"), GI->SofaTextureList[ShipIdx]);
     }
-    
-    UE_LOG(LogTemp, Warning, TEXT("🏁 [ApplyCustomization] 함수 종료"));
 }
 
 bool AMyCharacter::IsAxeEquipped()

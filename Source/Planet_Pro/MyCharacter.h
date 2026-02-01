@@ -23,6 +23,24 @@ enum class ECharacterWeaponState : uint8
 	Syringe     UMETA(DisplayName = "주사기 들음")
 };
 
+USTRUCT(BlueprintType)
+struct FRepCustomData
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadWrite)
+	int32 BodyIndex = 0;
+
+	UPROPERTY(BlueprintReadWrite)
+	int32 EyeIndex = 0;
+
+	UPROPERTY(BlueprintReadWrite)
+	int32 MouthIndex = 0;
+
+	UPROPERTY(BlueprintReadWrite)
+	int32 ShipIndex = 0; // MachineIndex
+};
+
 UCLASS()
 class PLANET_PRO_API AMyCharacter : public ACharacter
 {
@@ -39,6 +57,18 @@ protected:
 	FTimerHandle SaveTimerHandle;
 
 public:	
+	
+	// 1. 모든 플레이어가 공유받을 변수 (값이 바뀌면 OnRep 자동 실행)
+	UPROPERTY(ReplicatedUsing = OnRep_CustomData, BlueprintReadOnly, Category = "Customization")
+	FRepCustomData RepCustomData;
+
+	// 2. 변수가 바뀌면 실행될 함수 (여기서 실제로 옷을 갈아입힘)
+	UFUNCTION()
+	void OnRep_CustomData();
+
+	// 3. 클라 -> 서버로 정보 보내는 함수
+	UFUNCTION(Server, Reliable)
+	void Server_ApplyCustomData(FRepCustomData NewData);
 	
 	UFUNCTION(Server, Reliable)
 	void Server_EquipItem(FName ItemID);
