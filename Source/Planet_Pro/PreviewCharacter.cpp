@@ -13,7 +13,9 @@ void APreviewCharacter::BeginPlay()
 
     UE_LOG(LogTemp, Warning, TEXT("🕵️‍♂️ [Preview] BeginPlay 시작!"));
 
-    // 1. 컴포넌트 찾기 (이 부분은 잘 되므로 기존 유지)
+    // =================================================================
+    // 1. [StaticMesh] 찾기 (캐릭터 몸통, 스태틱 우주선)
+    // =================================================================
     TArray<UStaticMeshComponent*> StaticComps;
     GetComponents(StaticComps);
 
@@ -22,47 +24,88 @@ void APreviewCharacter::BeginPlay()
         FString Name = Comp->GetName();
         int32 MatCount = Comp->GetNumMaterials();
 
+        // 1-1. 캐릭터 몸통 (Mesh_Char)
         if (Name.Contains(TEXT("Mesh_Char")))
         {
             Target_CharBody = Comp;
-            if (MatCount > 0) DMI_Body = Target_CharBody->CreateAndSetMaterialInstanceDynamic(0);
+            // ★ [수정] 안전장치: 0번 재질이 있을 때만 생성
+            if (MatCount > 0) 
+            {
+                DMI_Body = Target_CharBody->CreateAndSetMaterialInstanceDynamic(0);
+            }
         }
-        else if (Name.Equals(TEXT("StaticMesh")) || Name.Contains(TEXT("StaticMesh"))) // "cu"가 들어있는 컴포넌트
+        // 1-2. 스태틱 우주선 (StaticMesh)
+        else if (Name.Contains(TEXT("StaticMesh")) || Name.Equals(TEXT("StaticMesh")))
         {
             Target_SpaceShip = Comp;
-            if (MatCount > 0) DMI_Shell = Target_SpaceShip->CreateAndSetMaterialInstanceDynamic(0); // M_BaseColor (0번)
-            if (MatCount > 4) DMI_Sofa = Target_SpaceShip->CreateAndSetMaterialInstanceDynamic(4);  // M_Sofa (4번)
+            UE_LOG(LogTemp, Warning, TEXT("🚀 [Static] 스태틱 우주선 발견! (재질 개수: %d)"), MatCount);
+
+            if (MatCount > 0) DMI_Shell = Target_SpaceShip->CreateAndSetMaterialInstanceDynamic(0);
+            
+            // 소파 (4번 인덱스)
+            if (MatCount > 4) 
+            {
+                DMI_Sofa = Target_SpaceShip->CreateAndSetMaterialInstanceDynamic(4);
+                UE_LOG(LogTemp, Warning, TEXT("   ✅ [Static] 소파 DMI 생성 성공!"));
+            }
         }
     }
-    
-    // ... 스켈레탈 메시 찾는 코드 생략 (기존 유지) ...
-    // 혹시 모르니 스켈레탈 메시 찾는 부분도 DMI_Machine 연결 잘 되어있는지 확인해주세요.
 
     // =================================================================
-    // 2. 데이터 로딩 대기 로직 (수정됨)
+    // 2. [SkeletalMesh] 찾기 (움직이는 우주선, 주사기 등) - ★ 여기가 핵심!
+    // =================================================================
+    TArray<USkeletalMeshComponent*> SkelComps;
+    GetComponents(SkelComps);
+
+    for (USkeletalMeshComponent* Comp : SkelComps)
+    {
+        FString Name = Comp->GetName();
+        int32 MatCount = Comp->GetNumMaterials();
+
+        // 2-1. 움직이는 우주선 (SpaceShip 또는 Machine)
+        if (Name.Contains(TEXT("SpaceShip")) || Name.Contains(TEXT("Machine")))
+        {
+            Target_Machine = Comp;
+            UE_LOG(LogTemp, Warning, TEXT("🦴 [Skeletal] 움직이는 우주선 발견! (이름: %s, 재질 개수: %d)"), *Name, MatCount);
+
+            // 0번: 겉면
+            if (MatCount > 0) 
+            {
+                DMI_Machine = Comp->CreateAndSetMaterialInstanceDynamic(0);
+            }
+
+            // ★ [핵심] 4번: 소파 (움직이는 우주선도 4번에 소파가 있어야 함)
+            if (MatCount > 4)
+            {
+                DMI_Sofa_Skel = Comp->CreateAndSetMaterialInstanceDynamic(4);
+                UE_LOG(LogTemp, Warning, TEXT("   ✅ [Skeletal] 소파 DMI_Skel 생성 성공!"));
+            }
+            else
+            {
+                UE_LOG(LogTemp, Error, TEXT("   ❌ [Skeletal] 재질 개수 부족! (현재: %d < 필요: 5) -> 소파 변경 불가"), MatCount);
+            }
+        }
+    }
+
+    // =================================================================
+    // 3. 데이터 로딩 대기 로직 (기존 유지)
     // =================================================================
     UMyGameInstance* GI = Cast<UMyGameInstance>(GetGameInstance());
     if (GI)
     {
-        // 1. 이미 데이터가 있으면 -> 바로 적용
         if (GI->bIsDataLoaded)
         {
-            UE_LOG(LogTemp, Warning, TEXT("⚡ [Preview] 데이터 이미 있음! (Body:%d, Ship:%d) 즉시 적용."), 
-                GI->MyCustomData.BodyIndex, GI->MyCustomData.MachineIndex);
-            OnGILoadComplete(); 
+            UE_LOG(LogTemp, Warning, TEXT("⚡ [Preview] 데이터 이미 있음! 즉시 적용."));
+            OnGILoadComplete();
         }
-        // 2. 데이터가 없으면 -> 예약
         else
         {
             UE_LOG(LogTemp, Warning, TEXT("⏳ [Preview] 데이터 로딩 중... 예약 걸기!"));
-            
             GI->OnDataLoadSuccess.RemoveDynamic(this, &APreviewCharacter::OnGILoadComplete);
-            // ★ 헤더에 UFUNCTION() 없으면 여기서 터지거나 무시됨
             GI->OnDataLoadSuccess.AddDynamic(this, &APreviewCharacter::OnGILoadComplete);
         }
     }
 }
-
 void APreviewCharacter::OnGILoadComplete()
 {
     UMyGameInstance* GI = Cast<UMyGameInstance>(GetGameInstance());
@@ -159,7 +202,11 @@ void APreviewCharacter::UpdateMachine(int32 MachineIdx)
         // 소파(Static 4번) 변경
         if (DMI_Sofa) DMI_Sofa->SetTextureParameterValue(FName("SofaTex"), SofaTex);
         
-        // (만약 스켈레탈 메시에도 소파가 있다면 여기서 추가하면 됨)
+        if (DMI_Sofa_Skel)
+        {
+            DMI_Sofa_Skel->SetTextureParameterValue(FName("SofaTex"), SofaTex);
+            UE_LOG(LogTemp, Warning, TEXT("🛋️ [Skeletal] 움직이는 우주선 소파도 변경 완료!"));
+        }
     }
 }
 

@@ -18,6 +18,10 @@ protected:
     virtual void BeginPlay() override;
 
 public:
+    
+    UPROPERTY(BlueprintReadWrite, Category = "Material")
+    UMaterialInstanceDynamic* DMI_Sofa_Skel;
+    
     // [컴포넌트]
     UPROPERTY(BlueprintReadWrite, Category = "Components")
     UStaticMeshComponent* Target_CharBody; 
