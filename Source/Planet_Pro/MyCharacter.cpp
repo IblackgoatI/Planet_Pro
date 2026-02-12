@@ -1,0 +1,761 @@
+#include "MyCharacter.h"
+#include "Blueprint/UserWidget.h"
+#include "Kismet/GameplayStatics.h"
+#include "Json.h"
+#include "JsonUtilities.h"
+#include "MyGameInstance.h" // GameInstance 헤더 필수
+#include "MainHUDWidget.h"
+#include "Components/StaticMeshComponent.h"
+#include "Components/SkeletalMeshComponent.h"
+
+// PlayFab 헤더
+#include "PlayFab.h"
+#include "Core/PlayFabClientDataModels.h"
+#include "Core/PlayFabClientAPI.h"
+#include "Net/UnrealNetwork.h"
+
+AMyCharacter::AMyCharacter()
+{
+    PrimaryActorTick.bCanEverTick = true;
+    bReplicates = true;
+}
+
+// =================================================================
+// BeginPlay
+// =================================================================
+void AMyCharacter::BeginPlay()
+{
+    Super::BeginPlay();
+
+    // 1. 현재 맵 이름 확인 (Lobby나 Game인지, Customizing인지)
+    FString CurrentMapName = GetWorld()->GetMapName();
+    bool bIsCustomizingMap = CurrentMapName.Contains(TEXT("Customizing"));
+
+    UE_LOG(LogTemp, Warning, TEXT("🛠️ [MyChar] 맵 확인: %s (커마모드: %d)"), *CurrentMapName, bIsCustomizingMap);
+
+    // =========================================================
+    // [A] 컴포넌트 찾기 (스태틱/스켈레탈)
+    // =========================================================
+    TArray<UStaticMeshComponent*> StaticComps;
+    GetComponents(StaticComps);
+
+    for (UStaticMeshComponent* Comp : StaticComps)
+    {
+        FString CompName = Comp->GetName();
+
+        // 1. 캐릭터 몸통 (공통)
+        if (CompName.Equals(TEXT("Mesh_Char")) || (!bIsCustomizingMap && CompName.Equals(TEXT("StaticMesh"))))
+        {
+            Comp_CharBody = Comp;
+            if(Comp->GetNumMaterials() > 0) 
+                DMI_Body = Comp->CreateAndSetMaterialInstanceDynamic(0);
+        }
+        // 2. 우주선 (커마창 전용 - StaticMesh)
+        else if (bIsCustomizingMap && CompName.Equals(TEXT("StaticMesh")))
+        {
+            Comp_SpaceShip_Static = Comp;
+            int32 MatCount = Comp->GetNumMaterials();
+            if (MatCount > 0) DMI_Ship_Shell = Comp->CreateAndSetMaterialInstanceDynamic(0);
+            if (MatCount > 4) DMI_Ship_Sofa = Comp->CreateAndSetMaterialInstanceDynamic(4);
+        }
+    }
+
+    // 인게임 전용 (Skeletal 우주선)
+    if (!bIsCustomizingMap)
+    {
+        TArray<USkeletalMeshComponent*> SkelComps;
+        GetComponents(SkelComps);
+        for (USkeletalMeshComponent* Comp : SkelComps)
+        {
+            FString CompName = Comp->GetName();
+            if (CompName.Contains(TEXT("test1")) || CompName.Contains(TEXT("SpaceShip")))
+            {
+                Comp_SpaceShip_Skel = Comp;
+                int32 MatCount = Comp->GetNumMaterials();
+                if(MatCount > 0) DMI_Ship_Shell = Comp->CreateAndSetMaterialInstanceDynamic(0);
+                if(MatCount > 4) DMI_Ship_Sofa = Comp->CreateAndSetMaterialInstanceDynamic(4);
+            }
+            if (CompName.Equals(TEXT("Cylinder001")))
+            {
+                Comp_EquippedSyringe = Comp;
+                Comp_EquippedSyringe->SetVisibility(false); // 평소엔 숨김
+                UE_LOG(LogTemp, Warning, TEXT("✅ 주사기(SyringeMesh) 연결 완료!"));
+            }
+        }
+    }
+
+    // =============================================================
+    // ★ [핵심 수정] 타이밍 문제 해결 (비동기 로딩 대기)
+    // =============================================================
+    UMyGameInstance* GI = Cast<UMyGameInstance>(GetGameInstance());
+    if (GI)
+    {
+        // 1. 만약 데이터가 이미 로드되어 있다면? -> 즉시 적용!
+        if (GI->bIsDataLoaded)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("⚡ [BeginPlay] 데이터가 이미 있습니다. 즉시 적용합니다!"));
+            ApplyCustomizationFromGI();
+        }
+        // 2. 데이터가 아직 안 왔다면? -> "다 되면 불러줘"라고 예약!
+        else
+        {
+            UE_LOG(LogTemp, Warning, TEXT("⏳ [BeginPlay] 데이터 로딩 중... 도착하면 적용하도록 예약합니다."));
+            
+            // 혹시 모를 중복 방지를 위해 제거 후 추가
+            GI->OnDataLoadSuccess.RemoveDynamic(this, &AMyCharacter::ApplyCustomizationFromGI);
+            GI->OnDataLoadSuccess.AddDynamic(this, &AMyCharacter::ApplyCustomizationFromGI);
+        }
+    }
+
+
+    // 3. 저장된 커마 적용
+    ApplyCustomizationFromGI();
+
+    // =============================================================
+    // 무기 숨김
+    // =============================================================
+    if (WeaponMeshComp)
+    {
+        WeaponMeshComp->SetVisibility(false);
+    }
+
+    // =============================================================
+    // HUD 생성 (로비 제외)
+    // =============================================================
+    FString MapName = GetWorld()->GetMapName();
+    if (!MapName.Contains("Lobby") && MainHUDClass)
+    {
+        APlayerController* PC = Cast<APlayerController>(GetController());
+        if (PC)
+        {
+            MainHUDInstance = CreateWidget<UMainHUDWidget>(PC, MainHUDClass);
+            if (MainHUDInstance)
+            {
+                MainHUDInstance->AddToViewport();
+                if (MainHUDInstance->InventoryWindow)
+                    MainHUDInstance->InventoryWindow->SetVisibility(ESlateVisibility::Hidden);
+            }
+        }
+    }
+
+    // =============================================================
+    // PlayFab 로그인 & 인벤토리 로드
+    // =============================================================
+    auto ClientAPI = IPlayFabModuleInterface::Get().GetClientAPI();
+
+    if (ClientAPI.IsValid() && ClientAPI->IsClientLoggedIn())
+    {
+        LoadInventoryFromPlayFab();
+    }
+    else
+    {
+        // 로그인 안 되어 있으면 자동 로그인 시도
+        PlayFab::ClientModels::FLoginWithCustomIDRequest Request;
+        Request.CustomId = FPlatformProcess::ComputerName();
+        Request.CreateAccount = true;
+
+        ClientAPI->LoginWithCustomID(
+            Request,
+            PlayFab::UPlayFabClientAPI::FLoginWithCustomIDDelegate::CreateLambda(
+                [this](const PlayFab::ClientModels::FLoginResult&)
+                {
+                    UE_LOG(LogTemp, Warning, TEXT("✅ [PlayFab] 자동 로그인 성공. 인벤토리 로드 시작."));
+                    LoadInventoryFromPlayFab();
+                }),
+            PlayFab::FPlayFabErrorDelegate::CreateLambda(
+                [](const PlayFab::FPlayFabCppError& Error)
+                {
+                    UE_LOG(LogTemp, Error, TEXT("❌ PlayFab 로그인 실패: %s"), *Error.ErrorMessage);
+                })
+        );
+    }
+    OnRep_CustomData();
+}
+
+// =================================================================
+// Input Setup
+// =================================================================
+void AMyCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
+{
+    Super::SetupPlayerInputComponent(PlayerInputComponent);
+
+    PlayerInputComponent->BindAction("Inventory", IE_Pressed, this, &AMyCharacter::OnInventoryKeyPressed);
+    PlayerInputComponent->BindAction("GetAxe", IE_Pressed, this, &AMyCharacter::GetAxeCheat);
+
+    PlayerInputComponent->BindAction("QuickSlot1", IE_Pressed, this, &AMyCharacter::OnQuickSlot1);
+    PlayerInputComponent->BindAction("QuickSlot2", IE_Pressed, this, &AMyCharacter::OnQuickSlot2);
+    PlayerInputComponent->BindAction("QuickSlot3", IE_Pressed, this, &AMyCharacter::OnQuickSlot3);
+    PlayerInputComponent->BindAction("QuickSlot4", IE_Pressed, this, &AMyCharacter::OnQuickSlot4);
+    PlayerInputComponent->BindAction("QuickSlot5", IE_Pressed, this, &AMyCharacter::OnQuickSlot5);
+    PlayerInputComponent->BindAction("QuickSlot6", IE_Pressed, this, &AMyCharacter::OnQuickSlot6);
+    PlayerInputComponent->BindAction("QuickSlot7", IE_Pressed, this, &AMyCharacter::OnQuickSlot7);
+    PlayerInputComponent->BindAction("QuickSlot8", IE_Pressed, this, &AMyCharacter::OnQuickSlot8);
+}
+
+// =================================================================
+// Inventory Logic
+// =================================================================
+void AMyCharacter::OnInventoryKeyPressed()
+{
+    if (MainHUDInstance)
+    {
+        MainHUDInstance->ToggleInventory();
+        if (MainHUDInstance->bIsInventoryOpen)
+            MainHUDInstance->RefreshInventory(Inventory);
+    }
+}
+
+void AMyCharacter::AddInventoryItem(FName NewItemID, int32 NewAmount)
+{
+    if (NewAmount <= 0) return;
+
+    // 1. 기존 아이템 합치기
+    for (FPlanetItemInfo& Item : Inventory)
+    {
+        if (Item.ItemID == NewItemID)
+        {
+            Item.Amount += NewAmount;
+            if (MainHUDInstance) MainHUDInstance->RefreshInventory(Inventory);
+            SaveInventoryToPlayFab();
+            return;
+        }
+    }
+
+    // 2. 빈 슬롯 찾기
+    for (int32 i = 0; i < Inventory.Num(); i++)
+    {
+        if (Inventory[i].ItemID == FName("None") || Inventory[i].Amount <= 0)
+        {
+            Inventory[i].ItemID = NewItemID;
+            Inventory[i].Amount = NewAmount;
+            if (MainHUDInstance) MainHUDInstance->RefreshInventory(Inventory);
+            SaveInventoryToPlayFab();
+            if (i == CurrentSelectedSlotIndex) UpdateWeaponVisuals();
+            return; 
+        }
+    }
+
+    // 3. 새 슬롯 추가
+    FPlanetItemInfo NewItem;
+    NewItem.ItemID = NewItemID;
+    NewItem.Amount = NewAmount;
+    Inventory.Add(NewItem);
+
+    if (MainHUDInstance) MainHUDInstance->RefreshInventory(Inventory);
+    SaveInventoryToPlayFab();
+}
+
+void AMyCharacter::SwapInventoryItems(int32 A, int32 B)
+{
+    if (A == B) return;
+    if (A < 0 || B < 0) return;
+
+    int32 MaxIndex = FMath::Max(A, B);
+    if (Inventory.Num() <= MaxIndex)
+    {
+        int32 OldSize = Inventory.Num();
+        int32 NewSize = MaxIndex + 1;
+        Inventory.SetNum(NewSize);
+        for (int32 i = OldSize; i < NewSize; i++)
+        {
+            Inventory[i].ItemID = FName("None"); 
+            Inventory[i].Amount = 0;
+        }
+    }
+
+    Inventory.Swap(A, B);
+
+    if (MainHUDInstance) MainHUDInstance->RefreshInventory(Inventory);
+    SaveInventoryToPlayFab();
+    UpdateWeaponVisuals();
+}
+
+// =================================================================
+// PlayFab Save / Load
+// =================================================================
+void AMyCharacter::SaveInventoryToPlayFab()
+{
+    auto ClientAPI = IPlayFabModuleInterface::Get().GetClientAPI();
+    if (!ClientAPI.IsValid() || !ClientAPI->IsClientLoggedIn()) return;
+
+    TArray<TSharedPtr<FJsonValue>> JsonArray;
+    for (const auto& Item : Inventory)
+    {
+        TSharedPtr<FJsonObject> Obj = MakeShareable(new FJsonObject);
+        Obj->SetStringField("ItemID", Item.ItemID.ToString()); // 저장할 땐 "ItemID"로 통일
+        Obj->SetNumberField("Amount", Item.Amount);
+        JsonArray.Add(MakeShareable(new FJsonValueObject(Obj)));
+    }
+
+    TSharedPtr<FJsonObject> Root = MakeShareable(new FJsonObject);
+    Root->SetArrayField("Items", JsonArray);
+
+    FString Output;
+    TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&Output);
+    FJsonSerializer::Serialize(Root.ToSharedRef(), Writer);
+
+    PlayFab::ClientModels::FUpdateUserDataRequest Req;
+    Req.Data.Add("Inventory", Output);
+
+    ClientAPI->UpdateUserData(Req,
+        PlayFab::UPlayFabClientAPI::FUpdateUserDataDelegate::CreateUObject(this, &AMyCharacter::OnSaveSuccess),
+        PlayFab::FPlayFabErrorDelegate::CreateUObject(this, &AMyCharacter::OnSaveError));
+}
+
+void AMyCharacter::LoadInventoryFromPlayFab()
+{
+    auto ClientAPI = IPlayFabModuleInterface::Get().GetClientAPI();
+    if (!ClientAPI.IsValid()) return;
+
+    PlayFab::ClientModels::FGetUserDataRequest Req;
+    Req.Keys.Add("Inventory");
+
+    ClientAPI->GetUserData(
+        Req,
+        PlayFab::UPlayFabClientAPI::FGetUserDataDelegate::CreateUObject(this, &AMyCharacter::OnLoadSuccess),
+        PlayFab::FPlayFabErrorDelegate::CreateUObject(this, &AMyCharacter::OnLoadError)
+    );
+}
+
+// ★ [핵심 수정] 안전한 JSON 파싱 (Null String 에러 해결)
+void AMyCharacter::OnLoadSuccess(const PlayFab::ClientModels::FGetUserDataResult& Result)
+{
+    if (!Result.Data.Contains("Inventory")) 
+    {
+        UE_LOG(LogTemp, Warning, TEXT("⚠️ [PlayFab] 저장된 인벤토리 없음."));
+        return;
+    }
+
+    FString JsonString = Result.Data["Inventory"].Value;
+    if (JsonString.IsEmpty()) return;
+
+    TSharedPtr<FJsonObject> Root;
+    TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(JsonString);
+
+    if (FJsonSerializer::Deserialize(Reader, Root))
+    {
+        Inventory.Empty(); // 로드 전 초기화
+
+        const TArray<TSharedPtr<FJsonValue>>* Items;
+        if (Root->TryGetArrayField("Items", Items))
+        {
+            for (auto& V : *Items)
+            {
+                TSharedPtr<FJsonObject> Obj = V->AsObject();
+                if (!Obj.IsValid()) continue;
+
+                FPlanetItemInfo Item;
+                
+                // ★ [안전장치] ItemID가 있으면 읽고, 없으면 ID를 읽음
+                if (Obj->HasField("ItemID"))
+                {
+                    Item.ItemID = FName(*Obj->GetStringField("ItemID"));
+                }
+                else if (Obj->HasField("ID"))
+                {
+                    Item.ItemID = FName(*Obj->GetStringField("ID"));
+                }
+                else
+                {
+                    Item.ItemID = FName("None");
+                }
+
+                // Amount 읽기
+                if (Obj->HasField("Amount"))
+                {
+                    Item.Amount = Obj->GetNumberField("Amount");
+                }
+                else
+                {
+                    Item.Amount = 1;
+                }
+
+                // 유효한 아이템만 추가
+                if (Item.ItemID != FName("None") && Item.Amount > 0)
+                {
+                    Inventory.Add(Item);
+                }
+            }
+        }
+        
+        UE_LOG(LogTemp, Warning, TEXT("✅ [PlayFab] 인벤토리 로드 완료 (총 %d개)"), Inventory.Num());
+    }
+
+    if (MainHUDInstance) MainHUDInstance->RefreshInventory(Inventory);
+    UpdateWeaponVisuals();
+}
+
+void AMyCharacter::OnLoadError(const PlayFab::FPlayFabCppError& Error)
+{
+    UE_LOG(LogTemp, Error, TEXT("❌ Load 실패: %s"), *Error.ErrorMessage);
+}
+
+void AMyCharacter::OnSaveSuccess(const PlayFab::ClientModels::FUpdateUserDataResult&) {}
+void AMyCharacter::OnSaveError(const PlayFab::FPlayFabCppError& Error)
+{
+    UE_LOG(LogTemp, Error, TEXT("❌ Save 실패: %s"), *Error.ErrorMessage);
+}
+
+// =================================================================
+// QuickSlot / Weapon
+// =================================================================
+void AMyCharacter::SelectQuickSlot(int32 Slot)
+{
+    // 1. 내 UI 갱신 (이건 나만 보면 되니까 그냥 실행)
+    CurrentSelectedSlotIndex = Slot;
+    if (MainHUDInstance)
+    {
+        MainHUDInstance->UpdateQuickSlotHighlight(Slot);
+    }
+
+    // 2. 인벤토리에 아이템이 있는지 확인
+    FName TargetItemID = FName("None");
+    if (Inventory.IsValidIndex(Slot))
+    {
+        TargetItemID = Inventory[Slot].ItemID;
+    }
+
+    // ★ [핵심] 서버한테 "나 이거 낄래!" 하고 요청 보내기
+    Server_EquipItem(TargetItemID);
+}
+
+void AMyCharacter::UpdateWeaponVisuals()
+{
+    if (GetLocalRole() < ROLE_Authority) return;
+    // 1. 현재 선택된 아이템 확인
+    if (!Inventory.IsValidIndex(CurrentSelectedSlotIndex)) return;
+
+    FName CurrentItemID = Inventory[CurrentSelectedSlotIndex].ItemID;
+    
+    // 2. 상태 결정 (Enum 값 정하기)
+    ECharacterWeaponState NewState = ECharacterWeaponState::Unarmed;
+
+    if (CurrentItemID == FName("Axe"))          NewState = ECharacterWeaponState::Axe;
+    else if (CurrentItemID == FName("Wood"))    NewState = ECharacterWeaponState::Wood;
+    else if (CurrentItemID == FName("Berry_D"))   NewState = ECharacterWeaponState::Berry;
+    else if (CurrentItemID == FName("Syringe")) NewState = ECharacterWeaponState::Syringe; 
+
+    // 3. 상태 변수 업데이트 (애니메이션 BP가 이걸 보고 동작을 바꿈)
+    CurrentWeaponState = NewState;
+    
+    OnRep_CurrentWeaponState();
+    
+    // ★ 4. 블루프린트한테 명령 내리기! (여기서 시각적 처리를 넘깁니다)
+    BP_UpdateEquippedItem(NewState); 
+    
+    // 로그 확인
+    UE_LOG(LogTemp, Warning, TEXT("명령 전달함: 상태 %d"), (int32)NewState);
+}
+
+// 1. 동기화 목록에 변수 등록
+void AMyCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+    Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+
+    // "CurrentWeaponState 변수는 모든 사람에게 동기화해라!"
+    DOREPLIFETIME(AMyCharacter, CurrentWeaponState);
+    
+    DOREPLIFETIME(AMyCharacter, RepCustomData);
+}
+
+// 2. 클라이언트가 변수 변경을 감지했을 때 실행되는 함수
+void AMyCharacter::OnRep_CurrentWeaponState()
+{
+    // "변수가 바뀌었으니 블루프린트야, 메시 업데이트 해라!"
+    BP_UpdateEquippedItem(CurrentWeaponState);
+}
+
+void AMyCharacter::OnQuickSlot1(){ SelectQuickSlot(0); }
+void AMyCharacter::OnQuickSlot2(){ SelectQuickSlot(1); }
+void AMyCharacter::OnQuickSlot3(){ SelectQuickSlot(2); }
+void AMyCharacter::OnQuickSlot4(){ SelectQuickSlot(3); }
+void AMyCharacter::OnQuickSlot5(){ SelectQuickSlot(4); }
+void AMyCharacter::OnQuickSlot6(){ SelectQuickSlot(5); }
+void AMyCharacter::OnQuickSlot7(){ SelectQuickSlot(6); }
+void AMyCharacter::OnQuickSlot8(){ SelectQuickSlot(7); }
+
+// =================================================================
+// Cheat
+// =================================================================
+void AMyCharacter::GetAxeCheat()
+{
+    // 중복 체크
+    for (const auto& Item : Inventory) { if (Item.ItemID == FName("Axe")) return; }
+
+    // 공간 확보
+    if (Inventory.Num() <= 0) Inventory.SetNum(1);
+
+    // 0번 자리 이사 준비
+    FPlanetItemInfo OldItem = Inventory[0];
+    bool bHasOldItem = (OldItem.ItemID != FName("None") && OldItem.Amount > 0);
+
+    // 도끼 지급
+    Inventory[0].ItemID = FName("Axe");
+    Inventory[0].Amount = 1;
+
+    // 밀려난 아이템 재배치
+    if (bHasOldItem) AddInventoryItem(OldItem.ItemID, OldItem.Amount);
+
+    if (MainHUDInstance) MainHUDInstance->RefreshInventory(Inventory);
+    SaveInventoryToPlayFab();
+    
+    if (CurrentSelectedSlotIndex == 0) UpdateWeaponVisuals();
+}
+
+// =================================================================
+// Customization (GameInstance -> Character)
+// =================================================================
+// =============================================================
+// ★ [수정] 보내주신 로그 강화 버전 (그대로 사용)
+// =============================================================
+void AMyCharacter::ApplyCustomizationFromGI()
+{
+    // 1. 내 컴퓨터인지 확인 (내 캐릭터만 GI에서 정보를 가져와야 함)
+    if (!IsLocallyControlled()) return;
+
+    UMyGameInstance* GI = Cast<UMyGameInstance>(GetGameInstance());
+    if (!GI || !GI->bIsDataLoaded) return;
+
+    // 2. GI 데이터를 구조체에 포장
+    FRepCustomData NewData;
+    NewData.BodyIndex = GI->MyCustomData.BodyIndex;
+    NewData.EyeIndex = GI->MyCustomData.EyeIndex;
+    NewData.MouthIndex = GI->MyCustomData.MouthIndex;
+    NewData.ShipIndex = GI->MyCustomData.MachineIndex;
+
+    // 3. 서버에게 전송! (나 이렇게 꾸몄어!)
+    Server_ApplyCustomData(NewData);
+    
+    UE_LOG(LogTemp, Warning, TEXT("📤 [Client] 서버로 커마 정보 전송함!"));
+}
+
+void AMyCharacter::Server_ApplyCustomData_Implementation(FRepCustomData NewData)
+{
+    // 서버 변수 저장 (이제 모든 클라한테 자동 전파됨)
+    RepCustomData = NewData;
+
+    // ★ 서버는 OnRep이 자동 실행 안 되므로 수동 실행 (호스트 화면 갱신용)
+    OnRep_CustomData();
+}
+
+// 2. 실제 외형 변경 (서버 & 클라 모두 실행됨)
+void AMyCharacter::OnRep_CustomData()
+{
+    // 1. DMI가 없으면 다시 찾아서 만들기 (안전장치)
+    if (!DMI_Body && Comp_CharBody)
+    {
+        if(Comp_CharBody->GetNumMaterials() > 0)
+            DMI_Body = Comp_CharBody->CreateAndSetMaterialInstanceDynamic(0);
+    }
+    
+    // 우주선 DMI도 없으면 생성 시도
+    if (!DMI_Ship_Shell && Comp_SpaceShip_Static) // 혹은 Skel
+    {
+        if(Comp_SpaceShip_Static->GetNumMaterials() > 0)
+            DMI_Ship_Shell = Comp_SpaceShip_Static->CreateAndSetMaterialInstanceDynamic(0);
+    }
+    
+    // 1. GI가 아니라, 공유받은 변수(RepCustomData)를 사용!
+    int32 BodyIdx = RepCustomData.BodyIndex;
+    int32 EyeIdx = RepCustomData.EyeIndex;
+    int32 MouthIdx = RepCustomData.MouthIndex;
+    int32 ShipIdx = RepCustomData.ShipIndex;
+
+    // 텍스처 리스트를 가져오기 위해 GI 접근 (리소스는 로컬에 있으니까)
+    UMyGameInstance* GI = Cast<UMyGameInstance>(GetGameInstance());
+    if (!GI) return;
+
+    UE_LOG(LogTemp, Warning, TEXT("🎨 [OnRep] 커마 적용 시작: Body(%d), Ship(%d)"), BodyIdx, ShipIdx);
+
+    // =========================================================
+    // [기존 코드 재활용] - 변수만 GI->... 에서 지역변수(BodyIdx)로 변경
+    // =========================================================
+    
+    // [1] 몸통 적용
+    if (DMI_Body)
+    {
+        if (GI->BodyTextureList.IsValidIndex(BodyIdx))
+            DMI_Body->SetTextureParameterValue(TEXT("BodyTex"), GI->BodyTextureList[BodyIdx]);
+        
+        if (GI->EyeTextureList.IsValidIndex(EyeIdx))
+            DMI_Body->SetTextureParameterValue(TEXT("EyeTex"), GI->EyeTextureList[EyeIdx]);
+
+        if (GI->MouthTextureList.IsValidIndex(MouthIdx))
+            DMI_Body->SetTextureParameterValue(TEXT("MouthTex"), GI->MouthTextureList[MouthIdx]);
+    }
+
+    // [2] 우주선 적용 (ShipIdx 사용)
+    if (DMI_Ship_Shell && GI->ShipTextureList.IsValidIndex(ShipIdx))
+    {
+        DMI_Ship_Shell->SetTextureParameterValue(TEXT("ShipTex"), GI->ShipTextureList[ShipIdx]);
+    }
+
+    // [3] 소파 적용
+    if (DMI_Ship_Sofa && GI->SofaTextureList.IsValidIndex(ShipIdx))
+    {
+        DMI_Ship_Sofa->SetTextureParameterValue(TEXT("SofaTex"), GI->SofaTextureList[ShipIdx]);
+    }
+}
+
+bool AMyCharacter::IsAxeEquipped()
+{
+    // 1. 현재 선택된 슬롯이 유효한지 확인
+    if (Inventory.IsValidIndex(CurrentSelectedSlotIndex))
+    {
+        // 2. 해당 슬롯의 아이템 ID가 "Axe"인지 확인
+        if (Inventory[CurrentSelectedSlotIndex].ItemID == FName("Axe"))
+        {
+            return true; // 도끼 맞음!
+        }
+    }
+
+    return false; // 도끼 아님 (빈손이거나 다른 아이템)
+}
+
+bool AMyCharacter::ConsumeInventoryItem(FName TargetItemID, int32 AmountToConsume)
+{
+    // 1. 인벤토리 순회하며 아이템 찾기
+    for (int32 i = 0; i < Inventory.Num(); i++)
+    {
+        // 아이템 ID가 일치하고, 개수가 충분한지 확인
+        if (Inventory[i].ItemID == TargetItemID && Inventory[i].Amount >= AmountToConsume)
+        {
+            // 2. 개수 차감
+            Inventory[i].Amount -= AmountToConsume;
+
+            // 3. 개수가 0이 되면 아이템 슬롯 비우기 (None 처리)
+            if (Inventory[i].Amount <= 0)
+            {
+                Inventory[i].ItemID = FName("None");
+                Inventory[i].Amount = 0;
+            }
+
+            // 4. 변경 사항 반영 (UI 갱신 + PlayFab 저장)
+            if (MainHUDInstance) 
+            {
+                MainHUDInstance->RefreshInventory(Inventory);
+            }
+            
+            // 무기 슬롯이었다면 비주얼 업데이트
+            if (i == CurrentSelectedSlotIndex) 
+            {
+                UpdateWeaponVisuals();
+            }
+
+            // ★ PlayFab에 저장 (서버 동기화)
+           //SaveInventoryToPlayFab();
+            // ★ 스마트 저장 요청 (3초 뒤 저장)
+            RequestSmartSave(); 
+            UE_LOG(LogTemp, Warning, TEXT("✅ [ConsumeItem] %s 아이템 %d개 소모 성공!"), *TargetItemID.ToString(), AmountToConsume);
+            return true; // 성공!
+        }
+    }
+
+    UE_LOG(LogTemp, Warning, TEXT("❌ [ConsumeItem] %s 아이템이 부족하거나 없습니다."), *TargetItemID.ToString());
+    return false; // 실패 (아이템 없음)
+}
+
+void AMyCharacter::RequestSmartSave()
+{
+    // 이미 타이머가 돌고 있다면 취소하고 다시 설정 (시간 연장)
+    GetWorld()->GetTimerManager().ClearTimer(SaveTimerHandle);
+
+    // 3초 뒤에 SaveInventoryToPlayFab 함수를 실행해라!
+    GetWorld()->GetTimerManager().SetTimer(SaveTimerHandle, this, &AMyCharacter::SaveInventoryToPlayFab, 3.0f, false);
+
+    UE_LOG(LogTemp, Log, TEXT("⏳ [SmartSave] 3초 뒤 저장 예약됨... (연타하면 시간 연장)"));
+}
+
+void AMyCharacter::Server_EquipItem_Implementation(FName ItemID)
+{
+    // 1. 받은 아이템 이름으로 상태 결정
+    ECharacterWeaponState NewState = ECharacterWeaponState::Unarmed;
+
+    if (ItemID == FName("Axe"))          NewState = ECharacterWeaponState::Axe;
+    else if (ItemID == FName("Wood"))    NewState = ECharacterWeaponState::Wood;
+    else if (ItemID == FName("Berry_D"))   NewState = ECharacterWeaponState::Berry;
+    else if (ItemID == FName("Syringe")) NewState = ECharacterWeaponState::Syringe;
+
+    // 2. 서버에서 상태 변수 변경 (이러면 Replicated 돼서 다같이 보임)
+    CurrentWeaponState = NewState;
+
+    // 3. 서버 자신도 메시 갱신 (서버 화면용)
+    OnRep_CurrentWeaponState();
+    
+    // 로그 확인
+    UE_LOG(LogTemp, Warning, TEXT("📡 [Server] 클라이언트 요청 처리함: %s -> 상태 %d"), *ItemID.ToString(), (int32)NewState);
+}
+
+bool AMyCharacter::TryExchangeItem(FName CostItemID, int32 CostAmount, FName RewardItemID, int32 RewardAmount)
+{
+    // 1. 재료 소모 시도 (이미 만들어두신 함수 활용!)
+    // ConsumeInventoryItem 안에서 개수 확인, 차감, 저장까지 다 처리해줍니다.
+    bool bConsumed = ConsumeInventoryItem(CostItemID, CostAmount);
+
+    if (bConsumed)
+    {
+        // 2. 소모 성공 시 -> 보상 아이템 지급
+        AddInventoryItem(RewardItemID, RewardAmount);
+        
+        UE_LOG(LogTemp, Warning, TEXT("💰 [Store] 교환 성공! %s(%d) 소모 -> %s(%d) 획득"), 
+            *CostItemID.ToString(), CostAmount, *RewardItemID.ToString(), RewardAmount);
+        
+        return true; // 교환 성공
+    }
+    else
+    {
+        // 3. 소모 실패 (재료 부족)
+        UE_LOG(LogTemp, Warning, TEXT("❌ [Store] 교환 실패: 재료(%s)가 부족합니다."), *CostItemID.ToString());
+        return false; // 교환 실패
+    }
+}
+
+// [헬퍼] 아이템 있는지 확인만 하는 함수 (소모 안 함)
+bool AMyCharacter::HasItem(FName ItemID, int32 Amount)
+{
+    for (const auto& Item : Inventory)
+    {
+        if (Item.ItemID == ItemID && Item.Amount >= Amount)
+            return true;
+    }
+    return false;
+}
+
+// [구매 1] 도끼 구매 (베리 10개 -> 도끼 1개)
+bool AMyCharacter::BuyAxe()
+{
+    // 1. 베리 10개 소모 시도
+    if (ConsumeInventoryItem(FName("Berry_D"), 10))
+    {
+        // 2. 성공 시 도끼 지급
+        AddInventoryItem(FName("Axe"), 1);
+        UE_LOG(LogTemp, Warning, TEXT("💰 도끼 구매 성공! (베리 10 소모)"));
+        return true;
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("❌ 도끼 구매 실패: 베리가 부족합니다."));
+    return false;
+}
+
+// [구매 2] 주사기 구매 (나무 15개 + 베리 10개 -> 주사기 1개)
+bool AMyCharacter::BuySyringe()
+{
+    // 1. 재료가 둘 다 있는지 먼저 확인 (검사)
+    bool bHasWood = HasItem(FName("Wood"), 15);
+    bool bHasBerry = HasItem(FName("Berry_D"), 10);
+
+    if (bHasWood && bHasBerry)
+    {
+        // 2. 둘 다 있으면 실제로 소모
+        ConsumeInventoryItem(FName("Wood"), 15);
+        ConsumeInventoryItem(FName("Berry_D"), 10);
+
+        // 3. 주사기 지급
+        AddInventoryItem(FName("Syringe"), 1);
+        UE_LOG(LogTemp, Warning, TEXT("💉 주사기 구매 성공! (나무 15 + 베리 10 소모)"));
+        return true;
+    }
+
+    UE_LOG(LogTemp, Warning, TEXT("❌ 주사기 구매 실패: 재료가 부족합니다."));
+    return false;
+}
